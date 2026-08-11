@@ -198,7 +198,7 @@ class ExternalSourcesTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_himalayas_recovery_skips_existing_sent_fingerprint_and_blocked_jobs(self):
         sent_item = ranked_job("sent", "HIGH")
-        blocked_item = replace(ranked_job("blocked", "HIGH"), location="USA, Canada, UK")
+        blocked_item = replace(ranked_job("blocked", "HIGH"), location="USA, Canada, UK", location_restrictions=["USA", "Canada", "UK"])
         provider = Provider("Himalayas", [sent_item, blocked_item])
         for item in provider.jobs:
             self.state.mark_processed(item, NOW - timedelta(days=1))

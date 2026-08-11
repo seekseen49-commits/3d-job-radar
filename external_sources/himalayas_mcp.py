@@ -48,9 +48,10 @@ class HimalayasMcpSource:
         url = str(row.get("url") or row.get("jobUrl") or row.get("canonicalUrl") or "")
         application = str(row.get("applicationLink") or "")
         location = row.get("locationRestrictions") or row.get("location") or ""
-        if isinstance(location, list): location = ", ".join(map(str, location))
+        restrictions = [str(value) for value in location] if isinstance(location, list) else None
+        if isinstance(location, list): location = ", ".join(restrictions)
         identifier = str(row.get("id") or row.get("guid") or url or f"{row.get('companyName','')}:{title}")
-        return ExternalJob("Himalayas", identifier, title, description, url or application, parse_datetime(row.get("pubDate") or row.get("publishedAt")), html_to_text(row.get("companyName") or row.get("company")), html_to_text(row.get("employmentType") or row.get("jobType")), html_to_text(location), str(row.get("salary") or ""), html_to_text(row.get("excerpt")), _number(row.get("minSalary")), _number(row.get("maxSalary")), str(row.get("currency") or ""), str(row.get("salaryPeriod") or ""), contract_duration_from_text(title, description), application)
+        return ExternalJob("Himalayas", identifier, title, description, url or application, parse_datetime(row.get("pubDate") or row.get("publishedAt")), html_to_text(row.get("companyName") or row.get("company")), html_to_text(row.get("employmentType") or row.get("jobType")), html_to_text(location), str(row.get("salary") or ""), html_to_text(row.get("excerpt")), _number(row.get("minSalary")), _number(row.get("maxSalary")), str(row.get("currency") or ""), str(row.get("salaryPeriod") or ""), contract_duration_from_text(title, description), application, restrictions)
 
 def _number(value: Any) -> float | None:
     try: return float(value) if value not in (None, "") else None

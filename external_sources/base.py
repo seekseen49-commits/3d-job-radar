@@ -43,6 +43,7 @@ class ExternalJob:
     salary_period: str = ""
     contract_duration: str = ""
     application_link: str = ""
+    location_restrictions: list[str] | None = None
 
     @property
     def raw_text(self) -> str:
@@ -66,7 +67,7 @@ class ExternalJob:
 
     @property
     def metadata(self):
-        return analyze_work_metadata(self.raw_text, self.location)
+        return analyze_work_metadata(self.raw_text, self.location_restrictions if self.location_restrictions is not None else self.location)
 
 
 # Эти шаблоны намеренно описывают профессию или задачу, а не случайный термин
@@ -235,10 +236,17 @@ class ExternalState:
         self.values["initialized"][source] = True
 
     def recovery_completed(self) -> bool:
-        return self.values.get("himalayas_recovery_72h_completed") is True
+        return self.recovery_version() >= 2
+
+    def recovery_version(self) -> int:
+        value = self.values.get("himalayas_recovery_version")
+        if isinstance(value, int):
+            return value
+        return 1 if self.values.get("himalayas_recovery_72h_completed") is True else 0
 
     def mark_recovery_completed(self) -> None:
         self.values["himalayas_recovery_72h_completed"] = True
+        self.values["himalayas_recovery_version"] = 2
 
     def prune(self, now: datetime) -> None:
         cutoff = now - STATE_RETENTION
@@ -298,7 +306,7 @@ async def process_external_provider(
     current = (now or datetime.now(UTC)).astimezone(UTC)
     is_recovery = recovery and provider.name == "Himalayas"
     if is_recovery and state.recovery_completed():
-        logging.info("Himalayas recovery backfill already completed")
+        logging.info("Himalayas recovery v2 already completed")
         return 0
     if not is_recovery and not state.is_due(provider.name, provider.interval_minutes, current):
         logging.info("Внешний источник %s пока не требует опроса", provider.name)
@@ -315,6 +323,7 @@ async def process_external_provider(
     sent = 0
     completed = True
     entries: list[tuple[ExternalJob, FilterResult, bool, bool]] = []
+    recovery_counts = {"fetched": len(jobs), "within_72h": 0, "strong_3d": 0, "russia_blocked": 0, "duplicates_sent_before": 0}
     for job in jobs:
         already_processed = state.is_processed(job)
         if already_processed and not is_recovery:
@@ -322,13 +331,18 @@ async def process_external_provider(
         eligible_for_initial = not first_run or (job.published_at is not None and job.published_at >= cutoff)
         if is_recovery:
             eligible_for_initial = job.published_at is not None and job.published_at >= cutoff
+            if eligible_for_initial: recovery_counts["within_72h"] += 1
         result = evaluator(job.raw_text, "general", "job_board")
         if not external_3d_relevant(job):
             result = FilterResult("rejected", "нет сильного признака 3D-роли или 3D-задачи во внешней вакансии", result.price)
+        else:
+            recovery_counts["strong_3d"] += 1 if is_recovery else 0
         if job.metadata.russia_eligibility == "blocked":
             result = FilterResult("rejected", "работа явно недоступна из России", result.price)
+            recovery_counts["russia_blocked"] += 1 if is_recovery else 0
         is_candidate = eligible_for_initial and should_send(result, settings)
         duplicate = is_candidate and state.has_fingerprint(job)
+        if is_recovery and duplicate: recovery_counts["duplicates_sent_before"] += 1
         entries.append((job, result, is_candidate, duplicate))
 
     selected_initial_ids: set[str] = set()
@@ -371,6 +385,7 @@ async def process_external_provider(
         state.finish_poll(provider.name, current)
     if completed and is_recovery:
         state.mark_recovery_completed()
+        logging.info("Himalayas recovery: fetched=%s within_72h=%s strong_3d=%s russia_blocked=%s duplicates_sent_before=%s candidates=%s selected=%s sent=%s", recovery_counts["fetched"], recovery_counts["within_72h"], recovery_counts["strong_3d"], recovery_counts["russia_blocked"], recovery_counts["duplicates_sent_before"], sum(1 for entry in entries if entry[2]), len(selected_initial_ids), sent)
     state.prune(current)
     state.save()
     return sent

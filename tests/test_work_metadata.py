@@ -7,8 +7,10 @@ class WorkMetadataTests(unittest.TestCase):
             self.assertEqual(analyze_work_metadata(text).russia_eligibility, "allowed")
         for text in ("US only", "Canada only", "must reside in Germany"):
             self.assertEqual(analyze_work_metadata(text).russia_eligibility, "blocked")
-        self.assertEqual(analyze_work_metadata("", "USA, Canada, UK").russia_eligibility, "blocked")
-        self.assertEqual(analyze_work_metadata("", "Germany, Russia, Poland").russia_eligibility, "allowed")
+        self.assertEqual(analyze_work_metadata("", ["USA", "Canada", "UK"]).russia_eligibility, "blocked")
+        self.assertEqual(analyze_work_metadata("", ["Germany", "Russia", "Poland"]).russia_eligibility, "allowed")
+        for text in ("remote only", "portfolio only", "contract only", "English only", "company headquartered in USA", "US company"):
+            self.assertEqual(analyze_work_metadata(text).russia_eligibility, "unknown")
         self.assertEqual(analyze_work_metadata("Our company is headquartered in USA").russia_eligibility, "unknown")
 
     def test_payment_methods(self):
