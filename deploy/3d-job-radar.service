@@ -1,0 +1,20 @@
+[Unit]
+Description=3D Job Radar Telegram collector
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=3d-job-radar
+Group=3d-job-radar
+WorkingDirectory=/opt/3d-job-radar
+EnvironmentFile=/etc/3d-job-radar/job-radar.env
+ExecStart=/opt/3d-job-radar/.venv/bin/python /opt/3d-job-radar/main.py
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,12 @@
+.env
+*.env
+.venv/
+*.session
+*.session-journal
+*.session*
+*.sqlite3
+scan_report.txt
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/

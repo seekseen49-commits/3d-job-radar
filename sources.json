@@ -1,0 +1,50 @@
+[
+  {
+    "channel_id": -1001193582142,
+    "name": "Afriwork (Freelance Ethiopia)",
+    "username": "freelance_ethio",
+    "mode": "general",
+    "source_type": "job_board",
+    "enabled": false
+  },
+  {
+    "channel_id": -1001137474577,
+    "name": "CG Freelance",
+    "username": null,
+    "mode": "general",
+    "source_type": "mixed",
+    "enabled": true
+  },
+  {
+    "channel_id": -1001484425873,
+    "name": "Jobs: Art and Animation | InGameJob.com",
+    "username": "ingamejob_art",
+    "mode": "general",
+    "source_type": "job_board",
+    "enabled": true
+  },
+  {
+    "channel_id": -1001282874987,
+    "name": "Work for Designers",
+    "username": "workindesign",
+    "mode": "general",
+    "source_type": "job_board",
+    "enabled": false
+  },
+  {
+    "channel_id": -1001438175826,
+    "name": "CG Animator Jobs",
+    "username": "animator_jobs",
+    "mode": "general",
+    "source_type": "job_board",
+    "enabled": true
+  },
+  {
+    "channel_id": -1001101041902,
+    "name": "renderbox",
+    "username": "renderboxmag",
+    "mode": "general",
+    "source_type": "job_board",
+    "enabled": true
+  }
+]
