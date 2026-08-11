@@ -76,3 +76,25 @@ class FilterTests(unittest.TestCase):
 
     def test_2d_only_youtube_post_is_rejected(self):
         self.assertEqual(evaluate("2D Animator / Motion Designer for a YouTube channel", "general", "mixed").category, "rejected")
+
+    def test_3d_asset_work_is_not_rejected_by_the_word_assets(self):
+        examples = [
+            ("2D/3D Game Artist - Environment - Contract", "Create high quality 3D environment assets for games"),
+            ("Senior Landscape Artist, full-time", "Create terrain and environment assets in Unreal Engine"),
+            ("3D Prop Artist, full-time", "Model and texture production-ready game assets"),
+            ("Environment Artist, full-time", "Create modular assets, materials and props"),
+        ]
+        for title, description in examples:
+            with self.subTest(title=title):
+                result = evaluate(f"{title}\n{description}", "general", "job_board")
+                self.assertNotEqual(result.reason, "исключено: assets")
+                self.assertIn(result.category, {"freelance_vacancy", "job_vacancy", "direct_order"})
+
+    def test_asset_pack_and_marketplace_promotion_remain_rejected(self):
+        for text in (
+            "Download our free 3D asset pack",
+            "Buy this environment asset pack",
+            "New assets available in our marketplace",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(evaluate(text, "general", "job_board").category, "rejected")

@@ -15,7 +15,13 @@ POSITIVE = (
     "environment artist", "character artist", "hard surface", "prop artist", "3d artist", "3d generalist", "modeller", "modeler",
     "cinema 4d", "maya", "3ds max", "zbrush", "substance painter", "product visualization", "предметная визуализация",
 )
-NEGATIVE = ("видеомонтаж", "монтаж видео", "озвучк", "ai-видео", "ai видео", "нейровидео", "графический дизайн", "логотип", "курсы", "обучение", "вебинар", "новости", "продам", "продажа", "assets", "ассеты", "asset pack")
+NEGATIVE = ("видеомонтаж", "монтаж видео", "озвучк", "ai-видео", "ai видео", "нейровидео", "графический дизайн", "логотип", "курсы", "обучение", "вебинар", "новости", "продам", "продажа")
+ASSET_PROMO_NEGATIVE = (
+    "asset pack", "assets for sale", "buy assets", "download assets",
+    "free asset pack", "marketplace", "asset store",
+    "пак ассетов", "ассеты на продажу", "купить ассеты", "скачать ассеты",
+    "бесплатный пакет ассетов", "маркетплейс", "магазин ассетов",
+)
 PRIVATE_PROMO_CUES = (
     "меня зовут", "я cg generalist", "я дизайнер", "я художник", "я моделлер", "я 3d-художник", "я 3д-художник",
     "я 3d artist", "i am a 3d artist", "i am a designer", "занимаюсь", "подключаюсь к проект", "беру проект",
@@ -136,7 +142,7 @@ def evaluate(text: str, mode: str, source_type: SourceType = "mixed") -> FilterR
     platform_promo = _cue_matches(content, PLATFORM_PROMO_CUES)
     if platform_promo:
         return _result("rejected", "реклама платформы или сервиса", price, hiring, deliverable, promo)
-    negative = _cue_matches(content, NEGATIVE)
+    negative = _cue_matches(content, NEGATIVE) + _cue_matches(content, ASSET_PROMO_NEGATIVE)
     if negative:
         return _result("rejected", f"исключено: {negative[0]}", price, hiring, deliverable, promo)
     if not content and mode != "3d_only":
