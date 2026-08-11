@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import unittest
 
-from external_sources.base import ExternalJob, ExternalState, contract_duration_from_text, external_3d_relevant, format_external_card, html_to_text, opportunity_priority, process_external_provider, process_external_sources
+from external_sources.base import ExternalJob, ExternalState, contract_duration_from_text, external_3d_reason, external_3d_relevant, format_external_card, html_to_text, opportunity_priority, process_external_provider, process_external_sources
 from external_sources.himalayas import HimalayasSource
 from external_sources.jobicy import JobicySource
 from external_sources.remotive import RemotiveSource
@@ -246,6 +246,7 @@ class ExternalSourcesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.sent, [])
         self.assertIn("title='Need a Blender artist to create one 3D model recent-direct'", output)
         self.assertIn("title='Graphic Designer'", output)
+        self.assertIn("strong_3d_reason=", output)
         self.assertNotIn("title='Need a Blender artist to create one 3D model old'", output)
         self.assertIn("Himalayas diagnostic:", output)
         self.assertEqual(self.state.values, before)
@@ -316,6 +317,37 @@ class ExternalParsingAndRelevanceTests(unittest.TestCase):
             "Product Visualization Artist", "CAD Modeler", "Senior Technical Artist", "Unreal Artist",
         )
         self.assertTrue(all(external_3d_relevant(job(index, title)) for index, title in enumerate(titles)))
+
+    def test_production_3d_titles_and_contextual_roles_pass_external_gate(self):
+        cases = (
+            ("2D/3D Game Artist - Environment - Contract", "", "explicit title: 2D/3D Game Artist"),
+            ("Surface Modeling Expert - Fully Remote - Upto $84/hr", "Create Class-A surfaces with CAD, NURBS and Rhino.", "surface modeling + technical 3D context"),
+            ("Senior Landscape Artist", "Create terrain and 3D environments in Unreal Engine.", "environment art + technical 3D context"),
+            ("R&D Art Generalist", "Own a Blender-based 3D asset pipeline.", "art generalist + technical 3D context"),
+        )
+        for index, (title, description, expected_reason) in enumerate(cases):
+            with self.subTest(title=title):
+                candidate = job(index, title, description=description)
+                self.assertTrue(external_3d_relevant(candidate))
+                self.assertEqual(external_3d_reason(candidate), expected_reason)
+
+    def test_ambiguous_modeling_and_generic_design_roles_stay_outside_external_gate(self):
+        titles = (
+            ("Visual Design Specialist - Fully Remote | Upto $150/hr", ""),
+            ("Senior Visual Designer 1", ""),
+            ("Product Designer (Figma)", ""),
+            ("Aerospace Engineer - Fully Remote | Upto $85/hr", ""),
+            ("SmartPlant 3D Administrator", "Administer SmartPlant software and user access."),
+            ("Financial Modeling Expert", ""),
+            ("Data Modeler", ""),
+            ("AI Model Engineer", ""),
+            ("Surface Modeling Expert", "Financial modeling for revenue forecasts."),
+            ("Senior Landscape Artist", "Landscape design for gardens and parks."),
+            ("R&D Art Generalist", "Coordinate visual design research."),
+        )
+        for index, (title, description) in enumerate(titles):
+            with self.subTest(title=title):
+                self.assertFalse(external_3d_relevant(job(index, title, description=description)))
 
     def test_priority_is_informational_and_high_is_marked_in_card(self):
         high = ExternalJob("Test", "high", "3D Artist", "Full-time role", "https://example.test/high", NOW, "Co", salary_raw="80000 USD per year", salary_min=70000, salary_max=80000, currency="USD", salary_period="year")

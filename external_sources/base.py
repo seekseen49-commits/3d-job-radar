@@ -80,31 +80,75 @@ STRONG_3D_PATTERNS = (
     r"\b(?:unreal(?:\s+engine)?|maya|cinema\s+4d|3ds\s+max)\s+artist\b",
     r"\bsketchup\b.{0,40}\b(?:rendering|model(?:ing|ling))\b",
 )
+EXPLICIT_3D_TITLE_SIGNALS = (
+    (r"\b(?:2d\s*/\s*)?3d\s+(?:game\s+)?artist\b", "explicit title: 2D/3D Game Artist"),
+    (r"\b3d\s+(?:environment|character|prop)\s+artist\b", "explicit title: 3D specialist artist"),
+    (r"\b(?:environment|prop|hard surface|technical)\s+artist\b", "explicit title: 3D production artist"),
+    (r"\b3d\s+(?:model(?:er|ler)|modeling artist|generalist|animator|visuali[sz]ation artist|rendering specialist)\b", "explicit title: 3D role"),
+    (r"\b(?:architectural visuali[sz]er|archviz artist|cgi artist|cg artist|rendering artist)\b", "explicit title: visualization role"),
+    (r"\b(?:product visuali[sz]ation artist|product rendering artist)\b", "explicit title: product visualization role"),
+    (r"\b(?:blender|maya|3ds max|cinema 4d|unreal(?: engine)?)\s+(?:artist|model(?:er|ler))\b", "explicit title: 3D software role"),
+    (r"\b(?:cad model(?:er|ler)|cad designer|3d cad designer)\b", "explicit title: CAD modeling role"),
+)
+CONTEXTUAL_3D_TITLE_PATTERNS = (
+    (r"\bsurface\s+model(?:er|ler|ing expert)\b", "surface modeling"),
+    (r"\b(?:landscape|world|terrain|level)\s+artist\b", "environment art"),
+    (r"\b(?:game\s+art|r\s*&\s*d\s+art|art)\s+generalist\b", "art generalist"),
+)
+ROLE_WITH_3D_CONTEXT_TITLE = r"\b(?:artist|designer|model(?:er|ler)|generalist|visualizer|animator|technical artist|cad (?:designer|expert)|rendering specialist)\b"
+TECHNICAL_3D_CONTEXT_PATTERNS = (
+    r"\b(?:unreal(?: engine)?|unity|blender|maya|3ds max|cinema 4d|c4d|zbrush|houdini|substance(?: painter)?)\b",
+    r"\b(?:3d assets?|3d environment|3d modeling|3d rendering|cgi|pbr|mesh(?:es)?|uv|texturing|rigging)\b",
+    r"\b(?:environment modeling|terrain modeling|world building|level art|game environment|lighting for 3d scenes)\b",
+    r"\b(?:nurbs|class[- ]a surfacing|cad surfacing|rhino|solidworks|catia|fusion 360|creo|industrial design modeling|product surface modeling)\b",
+)
 EXTERNAL_NON_3D_ROLES = (
     "customer success", "customer support", "marketing", "advertising", "ad operations", "software engineer",
-    "developer", "devops", "sales", "account manager", "product manager", "graphic designer", "ui/ux",
+    "developer", "devops", "sales", "account manager", "product manager", "product designer", "graphic designer",
+    "visual designer", "visual design", "figma", "ui/ux",
     "video editor", "social media",
 )
 ROLE_CONTEXT_PATTERNS = ("responsibil", "duties", "you will", "responsible", "requirements", "experience", "обязанност", "требован")
 
 
-def external_3d_relevant(job: ExternalJob) -> bool:
-    """Требует сильный сигнал 3D-роли/задачи для публичных job boards."""
+def external_3d_reason(job: ExternalJob) -> str | None:
+    """Возвращает объяснение сильного 3D-сигнала, не меняя общий filters.evaluate."""
     title = job.title.casefold()
     role_text = f"{job.excerpt}\n{job.description}".casefold()
+    for pattern, reason in EXPLICIT_3D_TITLE_SIGNALS:
+        if re.search(pattern, title, re.IGNORECASE):
+            return reason
+
+    has_technical_context = any(
+        re.search(pattern, role_text, re.IGNORECASE) for pattern in TECHNICAL_3D_CONTEXT_PATTERNS
+    )
+    if has_technical_context:
+        for pattern, title_reason in CONTEXTUAL_3D_TITLE_PATTERNS:
+            if re.search(pattern, title, re.IGNORECASE):
+                return f"{title_reason} + technical 3D context"
+        if re.search(ROLE_WITH_3D_CONTEXT_TITLE, title, re.IGNORECASE):
+            if not any(role in title for role in EXTERNAL_NON_3D_ROLES):
+                return "role + technical 3D context"
+
     if any(re.search(pattern, title, re.IGNORECASE) for pattern in STRONG_3D_PATTERNS):
-        return True
+        return "explicit title: established 3D role"
     matches = [match for pattern in STRONG_3D_PATTERNS if (match := re.search(pattern, role_text, re.IGNORECASE))]
     if not matches:
-        return False
+        return None
     # У нерелевантной профессии сильная фраза в произвольном описании не
     # достаточна: она должна быть частью обязанностей или требований роли.
     if any(role in title for role in EXTERNAL_NON_3D_ROLES):
-        return any(
+        has_role_context = any(
             any(cue in role_text[max(0, match.start() - 160):match.end() + 160] for cue in ROLE_CONTEXT_PATTERNS)
             for match in matches
         )
-    return True
+        return "3D responsibility context for non-3D title" if has_role_context else None
+    return "strong 3D role or task in description"
+
+
+def external_3d_relevant(job: ExternalJob) -> bool:
+    """Требует сильный сигнал 3D-роли/задачи для публичных job boards."""
+    return external_3d_reason(job) is not None
 
 
 def opportunity_priority(job: ExternalJob) -> str:
@@ -393,7 +437,8 @@ async def process_external_provider(
                 continue
             recovery_counts["within_72h"] += 1
         result = evaluator(job.raw_text, "general", "job_board")
-        strong_3d = external_3d_relevant(job)
+        strong_3d_reason = external_3d_reason(job)
+        strong_3d = strong_3d_reason is not None
         if not strong_3d:
             result = FilterResult("rejected", "нет сильного признака 3D-роли или 3D-задачи во внешней вакансии", result.price)
         else:
@@ -422,10 +467,10 @@ async def process_external_provider(
             if is_candidate and not duplicate:
                 recovery_counts["candidates_after_dedupe"] += 1
             logging.info(
-                "DIAG: title=%r published_at=%s strong_3d=%s filter_category=%s "
-                "filter_reason=%r russia=%s duplicate_sent=%s candidate=%s",
+                "DIAG: title=%r published_at=%s strong_3d=%s strong_3d_reason=%r "
+                "filter_category=%s filter_reason=%r russia=%s duplicate_sent=%s candidate=%s",
                 job.title, _timestamp(job.published_at) if job.published_at else "",
-                strong_3d, result.category, result.reason, job.metadata.russia_eligibility,
+                strong_3d, strong_3d_reason, result.category, result.reason, job.metadata.russia_eligibility,
                 duplicate, is_candidate and not duplicate,
             )
         entries.append((job, result, is_candidate, duplicate))
