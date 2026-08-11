@@ -6,6 +6,8 @@
 *.session*
 *.sqlite3
 scan_report.txt
+*.log
+state/*.tmp
 __pycache__/
 **/__pycache__/
 *.py[cod]
