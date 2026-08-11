@@ -24,6 +24,17 @@ from recipients import send_to_recipients
 STATE_PATH = Path(__file__).resolve().parent / "state" / "last_seen.json"
 
 
+def configure_logging(level: str) -> None:
+    """Настраивает единственный консольный handler до любой ветки запуска."""
+    root = logging.getLogger()
+    root.setLevel(getattr(logging, level.upper(), logging.INFO))
+    if not root.handlers:
+        logging.basicConfig(
+            level=root.level,
+            format="%(asctime)s %(levelname)s %(message)s",
+        )
+
+
 @dataclass(frozen=True)
 class Source:
     channel_id: int
@@ -156,7 +167,7 @@ async def run_telegram_once() -> None:
     from telethon import TelegramClient
 
     settings = load_settings()
-    logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(message)s")
+    configure_logging(settings.log_level)
     state = LastSeenState()
     client = TelegramClient(session_for_settings(settings), settings.api_id, settings.api_hash)
     bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
@@ -174,22 +185,41 @@ async def run_telegram_once() -> None:
         await bot.session.close()
 
 
-async def run_once() -> None:
-    """Telegram и внешние доски изолированы: сбой одного контура не останавливает другой."""
-    settings = load_settings()
-    if settings.himalayas_diagnostic:
-        from external_sources import ExternalState, HimalayasSource, process_external_sources
+async def run_himalayas_diagnostic(settings: Settings, *, provider: Any = None, state: Any = None) -> None:
+    """Read-only Himalayas diagnostic with visible markers and fail-fast errors."""
+    from external_sources import ExternalState, HimalayasSource
+    from external_sources.base import process_external_provider
 
-        async def no_send(_: str) -> None:
-            raise RuntimeError("Himalayas diagnostic must not send notifications")
+    async def no_send(_: str) -> None:
+        raise RuntimeError("Himalayas diagnostic must not send notifications")
 
-        await process_external_sources(
-            [HimalayasSource(settings.himalayas_poll_interval_minutes)],
-            ExternalState(),
+    logging.info("Himalayas diagnostic mode: START")
+    logging.info("Himalayas diagnostic: fetching public jobs...")
+    try:
+        await process_external_provider(
+            provider or HimalayasSource(settings.himalayas_poll_interval_minutes),
+            state or ExternalState(),
             settings,
             no_send,
-            himalayas_diagnostic=True,
+            diagnostic=True,
         )
+    except Exception:
+        logging.exception("Himalayas diagnostic mode: ERROR")
+        raise
+    logging.info("Himalayas diagnostic mode: DONE")
+
+
+async def run_once() -> None:
+    """Telegram и внешние доски изолированы: сбой одного контура не останавливает другой."""
+    try:
+        settings = load_settings()
+    except Exception:
+        configure_logging("INFO")
+        logging.exception("Job Radar startup configuration error")
+        raise
+    configure_logging(settings.log_level)
+    if settings.himalayas_diagnostic:
+        await run_himalayas_diagnostic(settings)
         return
 
     try:

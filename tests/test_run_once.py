@@ -1,10 +1,15 @@
+import copy
+from datetime import UTC, datetime, timedelta
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
+from unittest.mock import AsyncMock, patch
 
+from external_sources.base import ExternalJob, ExternalState
 from filters import FilterResult
-from run_once import LastSeenState, Source, process_source, process_sources
+import run_once as run_once_module
+from run_once import LastSeenState, Source, process_source, process_sources, run_himalayas_diagnostic
 
 
 class Message:
@@ -30,6 +35,20 @@ class FakeClient:
         for message in messages:
             if min_id is None or message.id > min_id:
                 yield message
+
+
+class DiagnosticProvider:
+    name = "Himalayas"
+    interval_minutes = 60
+
+    def __init__(self, jobs=None, error: Exception | None = None) -> None:
+        self.jobs = jobs or []
+        self.error = error
+
+    def fetch_jobs(self):
+        if self.error:
+            raise self.error
+        return self.jobs
 
 
 def settings(freelance=True, jobs=False):
@@ -103,3 +122,59 @@ class RunOnceTests(unittest.IsolatedAsyncioTestCase):
             raise RuntimeError("bot API failure")
         await process_source(self.source, client, self.state, settings(), failing_send, lambda *_: result_for("direct_order"))
         self.assertEqual(self.state.get(-1001), 10)
+
+
+class HimalayasDiagnosticEntrypointTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.state = ExternalState(Path(self.folder.name) / "external_sources.json")
+        self.settings = SimpleNamespace(
+            log_level="INFO",
+            himalayas_poll_interval_minutes=60,
+            send_freelance_vacancies=True,
+            send_job_vacancies=True,
+        )
+        self.now = datetime.now(UTC)
+
+    async def asyncTearDown(self):
+        self.folder.cleanup()
+
+    async def test_diagnostic_entrypoint_has_visible_start_diag_summary_and_done(self):
+        item = ExternalJob(
+            "Himalayas", "diag-1", "Need a Blender artist to create one 3D model",
+            "Paid task", "https://example.test/diag-1", self.now - timedelta(hours=1), "Studio",
+        )
+        before = copy.deepcopy(self.state.values)
+        with self.assertLogs(level="INFO") as logs:
+            await run_himalayas_diagnostic(
+                self.settings, provider=DiagnosticProvider([item]), state=self.state,
+            )
+        output = "\n".join(logs.output)
+        self.assertIn("Himalayas diagnostic mode: START", output)
+        self.assertIn("Himalayas diagnostic: fetching public jobs...", output)
+        self.assertIn("Himalayas diagnostic: fetched_total=1", output)
+        self.assertIn("DIAG:", output)
+        self.assertIn("Himalayas diagnostic:", output)
+        self.assertIn("Himalayas diagnostic mode: DONE", output)
+        self.assertEqual(self.state.values, before)
+
+    async def test_diagnostic_fetch_error_is_visible_and_reraised(self):
+        with self.assertLogs(level="ERROR") as logs:
+            with self.assertRaisesRegex(RuntimeError, "diagnostic fetch failed"):
+                await run_himalayas_diagnostic(
+                    self.settings,
+                    provider=DiagnosticProvider(error=RuntimeError("diagnostic fetch failed")),
+                    state=self.state,
+                )
+        self.assertIn("Himalayas diagnostic mode: ERROR", "\n".join(logs.output))
+
+    async def test_run_once_selects_diagnostic_execution_path_from_setting(self):
+        diagnostic_settings = SimpleNamespace(
+            **self.settings.__dict__, himalayas_diagnostic=True,
+        )
+        diagnostic = AsyncMock()
+        with patch.object(run_once_module, "load_settings", return_value=diagnostic_settings), patch.object(
+            run_once_module, "run_himalayas_diagnostic", diagnostic,
+        ):
+            await run_once_module.run_once()
+        diagnostic.assert_awaited_once_with(diagnostic_settings)

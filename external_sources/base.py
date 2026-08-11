@@ -367,7 +367,11 @@ async def process_external_provider(
         jobs = await asyncio.to_thread(provider.fetch_jobs)
     except Exception:
         logging.exception("Не удалось получить объявления %s; остальные источники продолжат работу", provider.name)
+        if is_diagnostic:
+            raise
         return 0
+    if is_diagnostic:
+        logging.info("Himalayas diagnostic: fetched_total=%s", len(jobs))
 
     first_run = not state.is_initialized(provider.name)
     baseline_only = bool(getattr(provider, "baseline_only", False)) and first_run
