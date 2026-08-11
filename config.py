@@ -33,6 +33,7 @@ class Settings:
     remotive_enabled: bool
     remotive_poll_interval_minutes: int
     himalayas_recovery_backfill: bool
+    himalayas_diagnostic: bool
     himalayas_mcp_enabled: bool
     himalayas_mcp_poll_minutes: int
 
@@ -83,6 +84,7 @@ def load_settings() -> Settings:
         remotive_enabled=_bool("REMOTIVE_ENABLED", True),
         remotive_poll_interval_minutes=_positive_int("REMOTIVE_POLL_INTERVAL_MINUTES", 360),
         himalayas_recovery_backfill=_bool("HIMALAYAS_RECOVERY_BACKFILL", False),
+        himalayas_diagnostic=_bool("HIMALAYAS_DIAGNOSTIC", False),
         himalayas_mcp_enabled=_bool("HIMALAYAS_MCP_ENABLED", True),
         himalayas_mcp_poll_minutes=_positive_int("HIMALAYAS_MCP_POLL_MINUTES", 10),
     )

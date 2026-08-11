@@ -176,6 +176,22 @@ async def run_telegram_once() -> None:
 
 async def run_once() -> None:
     """Telegram и внешние доски изолированы: сбой одного контура не останавливает другой."""
+    settings = load_settings()
+    if settings.himalayas_diagnostic:
+        from external_sources import ExternalState, HimalayasSource, process_external_sources
+
+        async def no_send(_: str) -> None:
+            raise RuntimeError("Himalayas diagnostic must not send notifications")
+
+        await process_external_sources(
+            [HimalayasSource(settings.himalayas_poll_interval_minutes)],
+            ExternalState(),
+            settings,
+            no_send,
+            himalayas_diagnostic=True,
+        )
+        return
+
     try:
         await run_telegram_once()
     except Exception:
@@ -186,7 +202,6 @@ async def run_once() -> None:
     from aiogram.enums import ParseMode
     from external_sources import ExternalState, HimalayasMcpSource, HimalayasSource, JobicySource, RemotiveSource, process_external_sources
 
-    settings = load_settings()
     bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     try:
         async def send(card: str) -> None:
@@ -202,7 +217,10 @@ async def run_once() -> None:
             providers.append(JobicySource(settings.jobicy_poll_interval_minutes))
         if settings.remotive_enabled:
             providers.append(RemotiveSource(settings.remotive_poll_interval_minutes))
-            total = await process_external_sources(providers, ExternalState(), settings, send, himalayas_recovery=settings.himalayas_recovery_backfill)
+            total = await process_external_sources(
+                providers, ExternalState(), settings, send,
+                himalayas_recovery=settings.himalayas_recovery_backfill,
+            )
         logging.info("Проверка внешних источников завершена: отправлено %s", total)
     except Exception:
         logging.exception("Ошибка внешнего контура не влияет на Telegram")

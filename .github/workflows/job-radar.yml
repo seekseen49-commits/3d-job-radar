@@ -8,6 +8,11 @@ on:
         required: false
         default: false
         type: boolean
+      himalayas_diagnostic:
+        description: "Read-only Himalayas 72h diagnostic; does not send or save state"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -28,6 +33,7 @@ jobs:
       OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
       ADDITIONAL_RECIPIENT_CHAT_IDS: ${{ secrets.ADDITIONAL_RECIPIENT_CHAT_IDS }}
       HIMALAYAS_RECOVERY_BACKFILL: ${{ inputs.himalayas_recovery_backfill || 'false' }}
+      HIMALAYAS_DIAGNOSTIC: ${{ inputs.himalayas_diagnostic || 'false' }}
       SEND_FREELANCE_VACANCIES: "true"
       SEND_JOB_VACANCIES: "true"
     steps:

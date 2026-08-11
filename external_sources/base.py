@@ -292,6 +292,56 @@ def format_external_card(job: ExternalJob, result: FilterResult) -> str:
     return "\n\n".join(field for field in fields if field)
 
 
+def _diagnostic_rejection_key(result: FilterResult, *, strong_3d: bool, russia_blocked: bool) -> str:
+    if not strong_3d:
+        return "no_strong_3d"
+    if russia_blocked:
+        return "russia_blocked"
+    reason = result.reason.casefold()
+    if result.category == "self_promo":
+        return "self_promo"
+    if "платформ" in reason or "platform" in reason:
+        return "platform_promo"
+    if "исключено" in reason or "negative" in reason:
+        return "negative_term"
+    if "намерени" in reason or "hire" in reason or "результат" in reason:
+        return "no_hiring_intent_or_deliverable"
+    return "other_rejected"
+
+
+def _empty_recovery_counts(fetched_total: int) -> dict[str, int]:
+    return {
+        "fetched_total": fetched_total, "within_72h": 0,
+        "within_72h_strong_3d": 0, "within_72h_not_strong_3d": 0,
+        "within_72h_russia_blocked": 0, "within_72h_direct_order": 0,
+        "within_72h_freelance_vacancy": 0, "within_72h_job_vacancy": 0,
+        "within_72h_self_promo": 0, "within_72h_rejected": 0,
+        "duplicates_sent_before": 0, "candidates_before_dedupe": 0,
+        "candidates_after_dedupe": 0, "selected": 0, "sent": 0,
+    }
+
+
+def _log_himalayas_diagnostics(counts: dict[str, int], reasons: dict[str, int], *, mode: str) -> None:
+    keys = (
+        "fetched_total", "within_72h", "within_72h_strong_3d",
+        "within_72h_not_strong_3d", "within_72h_russia_blocked",
+        "within_72h_direct_order", "within_72h_freelance_vacancy",
+        "within_72h_job_vacancy", "within_72h_self_promo",
+        "within_72h_rejected", "duplicates_sent_before",
+        "candidates_before_dedupe", "candidates_after_dedupe",
+        "selected", "sent",
+    )
+    logging.info(
+        "Himalayas %s: fetched_total=%s within_72h=%s within_72h_strong_3d=%s "
+        "within_72h_not_strong_3d=%s within_72h_russia_blocked=%s "
+        "within_72h_direct_order=%s within_72h_freelance_vacancy=%s "
+        "within_72h_job_vacancy=%s within_72h_self_promo=%s within_72h_rejected=%s "
+        "duplicates_sent_before=%s candidates_before_dedupe=%s candidates_after_dedupe=%s "
+        "selected=%s sent=%s rejection_reasons=%s",
+        mode, *(counts[key] for key in keys), dict(sorted(reasons.items())),
+    )
+
+
 async def process_external_provider(
     provider: ExternalProvider,
     state: ExternalState,
@@ -301,14 +351,16 @@ async def process_external_provider(
     now: datetime | None = None,
     evaluator: Callable[[str, str, str], FilterResult] = evaluate,
     recovery: bool = False,
+    diagnostic: bool = False,
 ) -> int:
     """Обрабатывает один provider; ошибка API остаётся локальной для него."""
     current = (now or datetime.now(UTC)).astimezone(UTC)
     is_recovery = recovery and provider.name == "Himalayas"
+    is_diagnostic = diagnostic and provider.name == "Himalayas"
     if is_recovery and state.recovery_completed():
         logging.info("Himalayas recovery v2 already completed")
         return 0
-    if not is_recovery and not state.is_due(provider.name, provider.interval_minutes, current):
+    if not is_recovery and not is_diagnostic and not state.is_due(provider.name, provider.interval_minutes, current):
         logging.info("Внешний источник %s пока не требует опроса", provider.name)
         return 0
     try:
@@ -323,27 +375,60 @@ async def process_external_provider(
     sent = 0
     completed = True
     entries: list[tuple[ExternalJob, FilterResult, bool, bool]] = []
-    recovery_counts = {"fetched": len(jobs), "within_72h": 0, "strong_3d": 0, "russia_blocked": 0, "duplicates_sent_before": 0}
+    recovery_counts = _empty_recovery_counts(len(jobs))
+    rejection_reasons: dict[str, int] = {}
     for job in jobs:
         already_processed = state.is_processed(job)
-        if already_processed and not is_recovery:
+        if already_processed and not is_recovery and not is_diagnostic:
             continue
         eligible_for_initial = not first_run or (job.published_at is not None and job.published_at >= cutoff)
-        if is_recovery:
+        within_72h = job.published_at is not None and job.published_at >= cutoff
+        if is_recovery or is_diagnostic:
             eligible_for_initial = job.published_at is not None and job.published_at >= cutoff
-            if eligible_for_initial: recovery_counts["within_72h"] += 1
+            if not within_72h:
+                continue
+            recovery_counts["within_72h"] += 1
         result = evaluator(job.raw_text, "general", "job_board")
-        if not external_3d_relevant(job):
+        strong_3d = external_3d_relevant(job)
+        if not strong_3d:
             result = FilterResult("rejected", "нет сильного признака 3D-роли или 3D-задачи во внешней вакансии", result.price)
         else:
-            recovery_counts["strong_3d"] += 1 if is_recovery else 0
+            if is_recovery or is_diagnostic:
+                recovery_counts["within_72h_strong_3d"] += 1
+        if (is_recovery or is_diagnostic) and not strong_3d:
+            recovery_counts["within_72h_not_strong_3d"] += 1
         if job.metadata.russia_eligibility == "blocked":
             result = FilterResult("rejected", "работа явно недоступна из России", result.price)
-            recovery_counts["russia_blocked"] += 1 if is_recovery else 0
+            if is_recovery or is_diagnostic:
+                recovery_counts["within_72h_russia_blocked"] += 1
+        if is_recovery or is_diagnostic:
+            recovery_counts[f"within_72h_{result.category}"] += 1
+            if result.category == "rejected":
+                key = _diagnostic_rejection_key(
+                    result, strong_3d=strong_3d, russia_blocked=job.metadata.russia_eligibility == "blocked",
+                )
+                rejection_reasons[key] = rejection_reasons.get(key, 0) + 1
         is_candidate = eligible_for_initial and should_send(result, settings)
         duplicate = is_candidate and state.has_fingerprint(job)
-        if is_recovery and duplicate: recovery_counts["duplicates_sent_before"] += 1
+        if is_recovery or is_diagnostic:
+            if is_candidate:
+                recovery_counts["candidates_before_dedupe"] += 1
+            if duplicate:
+                recovery_counts["duplicates_sent_before"] += 1
+            if is_candidate and not duplicate:
+                recovery_counts["candidates_after_dedupe"] += 1
+            logging.info(
+                "DIAG: title=%r published_at=%s strong_3d=%s filter_category=%s "
+                "filter_reason=%r russia=%s duplicate_sent=%s candidate=%s",
+                job.title, _timestamp(job.published_at) if job.published_at else "",
+                strong_3d, result.category, result.reason, job.metadata.russia_eligibility,
+                duplicate, is_candidate and not duplicate,
+            )
         entries.append((job, result, is_candidate, duplicate))
+
+    if is_diagnostic:
+        _log_himalayas_diagnostics(recovery_counts, rejection_reasons, mode="diagnostic")
+        return 0
 
     selected_initial_ids: set[str] = set()
     selected_initial_rank: dict[str, int] = {}
@@ -385,19 +470,24 @@ async def process_external_provider(
         state.finish_poll(provider.name, current)
     if completed and is_recovery:
         state.mark_recovery_completed()
-        logging.info("Himalayas recovery: fetched=%s within_72h=%s strong_3d=%s russia_blocked=%s duplicates_sent_before=%s candidates=%s selected=%s sent=%s", recovery_counts["fetched"], recovery_counts["within_72h"], recovery_counts["strong_3d"], recovery_counts["russia_blocked"], recovery_counts["duplicates_sent_before"], sum(1 for entry in entries if entry[2]), len(selected_initial_ids), sent)
+        recovery_counts["selected"] = len(selected_initial_ids)
+        recovery_counts["sent"] = sent
+        _log_himalayas_diagnostics(recovery_counts, rejection_reasons, mode="recovery")
     state.prune(current)
     state.save()
     return sent
 
 
 async def process_external_sources(
-    providers: list[ExternalProvider], state: ExternalState, settings: Any, send: Callable[[str], Awaitable[None]], *, now: datetime | None = None, himalayas_recovery: bool = False
+    providers: list[ExternalProvider], state: ExternalState, settings: Any, send: Callable[[str], Awaitable[None]], *, now: datetime | None = None, himalayas_recovery: bool = False, himalayas_diagnostic: bool = False
 ) -> int:
     total = 0
     for provider in providers:
         try:
-            total += await process_external_provider(provider, state, settings, send, now=now, recovery=himalayas_recovery)
+            total += await process_external_provider(
+                provider, state, settings, send, now=now, recovery=himalayas_recovery,
+                diagnostic=himalayas_diagnostic,
+            )
         except Exception:
             logging.exception("Ошибка внешнего источника %s не остановила остальные", provider.name)
     return total

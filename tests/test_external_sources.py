@@ -1,3 +1,4 @@
+import copy
 import tempfile
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -205,6 +206,58 @@ class ExternalSourcesTests(unittest.IsolatedAsyncioTestCase):
         self.state.mark_fingerprint(sent_item, NOW - timedelta(days=1))
         await process_external_provider(provider, self.state, SETTINGS, self.send, now=NOW, recovery=True)
         self.assertEqual(self.sent, [])
+
+    async def test_recovery_counters_only_count_recent_strong_3d_jobs(self):
+        recent = ranked_job("recent-strong", "HIGH", age_hours=1)
+        old = ranked_job("old-strong", "HIGH", age_hours=73)
+        weak = ExternalJob(
+            "Himalayas", "weak", "Customer Success Manager", "Remote full-time",
+            "https://example.test/weak", NOW - timedelta(hours=2), "Studio",
+        )
+        with self.assertLogs(level="INFO") as logs:
+            await process_external_provider(
+                Provider("Himalayas", [recent, old, weak]), self.state, SETTINGS,
+                self.send, now=NOW, recovery=True,
+            )
+        output = "\n".join(logs.output)
+        self.assertIn("within_72h=2", output)
+        self.assertIn("within_72h_strong_3d=1", output)
+        self.assertIn("within_72h_not_strong_3d=1", output)
+
+    async def test_diagnostic_logs_every_recent_job_without_sending_or_state_mutation(self):
+        direct = ranked_job("recent-direct", "HIGH", age_hours=1)
+        rejected = ExternalJob(
+            "Himalayas", "recent-rejected", "Graphic Designer", "Remote freelance",
+            "https://example.test/rejected", NOW - timedelta(hours=2), "Studio",
+        )
+        old = ranked_job("old", "HIGH", age_hours=73)
+        self.state.mark_processed(direct, NOW - timedelta(days=1))
+        self.state.mark_fingerprint(direct, NOW - timedelta(days=1))
+        self.state.finish_poll("Himalayas", NOW - timedelta(days=1))
+        self.state.mark_recovery_completed()
+        before = copy.deepcopy(self.state.values)
+        with self.assertLogs(level="INFO") as logs:
+            result = await process_external_provider(
+                Provider("Himalayas", [direct, rejected, old]), self.state, SETTINGS,
+                self.send, now=NOW, diagnostic=True,
+            )
+        output = "\n".join(logs.output)
+        self.assertEqual(result, 0)
+        self.assertEqual(self.sent, [])
+        self.assertIn("title='Need a Blender artist to create one 3D model recent-direct'", output)
+        self.assertIn("title='Graphic Designer'", output)
+        self.assertNotIn("title='Need a Blender artist to create one 3D model old'", output)
+        self.assertIn("Himalayas diagnostic:", output)
+        self.assertEqual(self.state.values, before)
+
+    async def test_regular_production_mode_still_sends_and_updates_state(self):
+        item = ranked_job("normal-production", "HIGH")
+        await process_external_provider(
+            Provider("Himalayas", [item]), self.state, SETTINGS, self.send, now=NOW,
+        )
+        self.assertEqual(len(self.sent), 1)
+        self.assertTrue(self.state.is_processed(item))
+        self.assertTrue(self.state.has_fingerprint(item))
 
 
 class ExternalParsingAndRelevanceTests(unittest.TestCase):
