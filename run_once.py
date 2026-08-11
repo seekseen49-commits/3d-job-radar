@@ -148,7 +148,7 @@ async def process_sources(
     return total
 
 
-async def run_once() -> None:
+async def run_telegram_once() -> None:
     from aiogram import Bot
     from aiogram.client.default import DefaultBotProperties
     from aiogram.enums import ParseMode
@@ -169,6 +169,39 @@ async def run_once() -> None:
         logging.info("Одноразовая проверка завершена: обработано сообщений %s", total)
     finally:
         await client.disconnect()
+        await bot.session.close()
+
+
+async def run_once() -> None:
+    """Telegram и внешние доски изолированы: сбой одного контура не останавливает другой."""
+    try:
+        await run_telegram_once()
+    except Exception:
+        logging.exception("Проверка Telegram завершилась ошибкой; внешние источники продолжат работу")
+
+    from aiogram import Bot
+    from aiogram.client.default import DefaultBotProperties
+    from aiogram.enums import ParseMode
+    from external_sources import ExternalState, HimalayasSource, JobicySource, RemotiveSource, process_external_sources
+
+    settings = load_settings()
+    bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    try:
+        async def send(card: str) -> None:
+            await bot.send_message(settings.owner_chat_id, card)
+
+        providers = []
+        if settings.himalayas_enabled:
+            providers.append(HimalayasSource(settings.himalayas_poll_interval_minutes))
+        if settings.jobicy_enabled:
+            providers.append(JobicySource(settings.jobicy_poll_interval_minutes))
+        if settings.remotive_enabled:
+            providers.append(RemotiveSource(settings.remotive_poll_interval_minutes))
+        total = await process_external_sources(providers, ExternalState(), settings, send)
+        logging.info("Проверка внешних источников завершена: отправлено %s", total)
+    except Exception:
+        logging.exception("Ошибка внешнего контура не влияет на Telegram")
+    finally:
         await bot.session.close()
 
 

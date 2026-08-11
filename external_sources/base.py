@@ -1,0 +1,352 @@
+"""Общие модели, состояние и безопасная обработка внешних job boards."""
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import html
+import json
+import logging
+import re
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from html.parser import HTMLParser
+from pathlib import Path
+from typing import Any, Awaitable, Callable, Protocol
+
+from filters import FilterResult, evaluate
+
+
+STATE_PATH = Path(__file__).resolve().parent.parent / "state" / "external_sources.json"
+BACKFILL_WINDOW = timedelta(hours=72)
+STATE_RETENTION = timedelta(days=30)
+MAX_INITIAL_NOTIFICATIONS = 10
+
+
+@dataclass(frozen=True)
+class ExternalJob:
+    source: str
+    external_id: str
+    title: str
+    description: str
+    url: str
+    published_at: datetime | None
+    company: str = ""
+    job_type: str = ""
+    location: str = ""
+    salary_raw: str = ""
+    excerpt: str = ""
+    salary_min: float | None = None
+    salary_max: float | None = None
+    currency: str = ""
+    salary_period: str = ""
+    contract_duration: str = ""
+
+    @property
+    def raw_text(self) -> str:
+        return "\n".join(part for part in (self.title, self.excerpt, self.description) if part).strip()
+
+
+# Эти шаблоны намеренно описывают профессию или задачу, а не случайный термин
+# внутри длинного текста объявления. Одинокие OBJ/CAD/Unreal/Blender не подходят.
+STRONG_3D_PATTERNS = (
+    r"\b3d\s+(?:artist|model(?:er|ler|ing)|designer|visuali[sz]ation|rendering|furniture|environment|animator|generalist)\b",
+    r"\b(?:cgi|cg)\s+artist\b", r"\barchitectural\s+visuali[sz]ation\b", r"\barchviz\b",
+    r"\b(?:product\s+(?:visuali[sz]ation|rendering)|environment artist|prop artist|hard surface|technical artist)\b",
+    r"\bblender\s+(?:artist|model(?:er|ler))\b", r"\b(?:cad\s+(?:model(?:er|ler)|designer)|3d\s+cad|stl\s+modeling)\b",
+    r"\b(?:unreal(?:\s+engine)?|maya|cinema\s+4d|3ds\s+max)\s+artist\b",
+    r"\bsketchup\b.{0,40}\b(?:rendering|model(?:ing|ling))\b",
+)
+EXTERNAL_NON_3D_ROLES = (
+    "customer success", "customer support", "marketing", "advertising", "ad operations", "software engineer",
+    "developer", "devops", "sales", "account manager", "product manager", "graphic designer", "ui/ux",
+    "video editor", "social media",
+)
+ROLE_CONTEXT_PATTERNS = ("responsibil", "duties", "you will", "responsible", "requirements", "experience", "обязанност", "требован")
+
+
+def external_3d_relevant(job: ExternalJob) -> bool:
+    """Требует сильный сигнал 3D-роли/задачи для публичных job boards."""
+    title = job.title.casefold()
+    role_text = f"{job.excerpt}\n{job.description}".casefold()
+    if any(re.search(pattern, title, re.IGNORECASE) for pattern in STRONG_3D_PATTERNS):
+        return True
+    matches = [match for pattern in STRONG_3D_PATTERNS if (match := re.search(pattern, role_text, re.IGNORECASE))]
+    if not matches:
+        return False
+    # У нерелевантной профессии сильная фраза в произвольном описании не
+    # достаточна: она должна быть частью обязанностей или требований роли.
+    if any(role in title for role in EXTERNAL_NON_3D_ROLES):
+        return any(
+            any(cue in role_text[max(0, match.start() - 160):match.end() + 160] for cue in ROLE_CONTEXT_PATTERNS)
+            for match in matches
+        )
+    return True
+
+
+def opportunity_priority(job: ExternalJob) -> str:
+    """Оценка дохода только для подходящих 3D-вакансий; ничего не отбрасывает."""
+    amount = max((value for value in (job.salary_min, job.salary_max) if value is not None), default=None)
+    if amount is None:
+        return "UNKNOWN"
+    period = job.salary_period.casefold()
+    if "hour" in period and amount >= 50:
+        return "HIGH"
+    if any(word in period for word in ("month", "monthly")) and amount >= 4_000:
+        return "HIGH"
+    if any(word in period for word in ("year", "annual")) and amount >= 60_000:
+        return "HIGH"
+    if not period and amount >= 3_000:
+        return "HIGH"
+    if job.contract_duration and amount > 0 and re.search(r"\b(?:6|7|8|9|1[0-2])\s*(?:month|months|мес)", job.contract_duration, re.IGNORECASE):
+        return "HIGH"
+    return "NORMAL"
+
+
+class ExternalProvider(Protocol):
+    name: str
+    interval_minutes: int
+
+    def fetch_jobs(self) -> list[ExternalJob]: ...
+
+
+class _PlainTextParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.parts: list[str] = []
+
+    def handle_data(self, data: str) -> None:
+        self.parts.append(data)
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in {"br", "p", "div", "li", "h1", "h2", "h3"}:
+            self.parts.append(" ")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"p", "div", "li", "h1", "h2", "h3"}:
+            self.parts.append(" ")
+
+
+def html_to_text(value: Any) -> str:
+    """Удаляет HTML, оставляя нормальный текст для строгой существующей фильтрации."""
+    parser = _PlainTextParser()
+    parser.feed(str(value or ""))
+    parser.close()
+    return " ".join(html.unescape("".join(parser.parts)).split())
+
+
+def parse_datetime(value: Any) -> datetime | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        timestamp = float(value)
+        if timestamp > 10_000_000_000:
+            timestamp /= 1000
+        try:
+            return datetime.fromtimestamp(timestamp, UTC)
+        except (OverflowError, OSError, ValueError):
+            return None
+    text = str(value).strip()
+    if text.isdigit():
+        return parse_datetime(int(text))
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+
+
+def contract_duration_from_text(*values: Any) -> str:
+    text = " ".join(str(value or "") for value in values)
+    match = re.search(r"\b\d+\s*[- ]?(?:month|months|week|weeks|year|years|месяц(?:ев|а)?|недел[ьяи])\b", text, re.IGNORECASE)
+    return match.group(0) if match else ""
+
+
+def _timestamp(value: datetime) -> str:
+    return value.astimezone(UTC).isoformat()
+
+
+def normalized_fingerprint(job: ExternalJob) -> str:
+    text = re.sub(r"[^\w]+", " ", f"{job.title} {job.company}".casefold()).strip()
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+class ExternalState:
+    """Состояние job boards, отдельное от Telegram `last_seen.json`."""
+
+    def __init__(self, path: Path = STATE_PATH) -> None:
+        self.path = path
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            raw = {}
+        self.values: dict[str, Any] = raw if isinstance(raw, dict) else {}
+        self.values.setdefault("last_poll_at", {})
+        self.values.setdefault("processed", {})
+        self.values.setdefault("fingerprints", {})
+        self.values.setdefault("initialized", {})
+
+    def is_due(self, source: str, interval_minutes: int, now: datetime) -> bool:
+        raw = self.values["last_poll_at"].get(source)
+        last = parse_datetime(raw)
+        return last is None or now - last >= timedelta(minutes=interval_minutes)
+
+    def is_initialized(self, source: str) -> bool:
+        return self.values["initialized"].get(source) is True
+
+    def is_processed(self, job: ExternalJob) -> bool:
+        return f"{job.source}:{job.external_id}" in self.values["processed"]
+
+    def has_fingerprint(self, job: ExternalJob) -> bool:
+        return normalized_fingerprint(job) in self.values["fingerprints"]
+
+    def mark_processed(self, job: ExternalJob, now: datetime) -> None:
+        self.values["processed"][f"{job.source}:{job.external_id}"] = _timestamp(now)
+
+    def mark_fingerprint(self, job: ExternalJob, now: datetime) -> None:
+        self.values["fingerprints"][normalized_fingerprint(job)] = _timestamp(now)
+
+    def finish_poll(self, source: str, now: datetime) -> None:
+        self.values["last_poll_at"][source] = _timestamp(now)
+        self.values["initialized"][source] = True
+
+    def prune(self, now: datetime) -> None:
+        cutoff = now - STATE_RETENTION
+        for section in ("processed", "fingerprints"):
+            self.values[section] = {
+                key: value for key, value in self.values[section].items()
+                if (parsed := parse_datetime(value)) is not None and parsed >= cutoff
+            }
+
+    def save(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(self.values, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        temporary.replace(self.path)
+
+
+def should_send(result: FilterResult, settings: Any) -> bool:
+    return result.category == "direct_order" or (
+        result.category == "freelance_vacancy" and settings.send_freelance_vacancies
+    ) or (result.category == "job_vacancy" and settings.send_job_vacancies)
+
+
+def format_external_card(job: ExternalJob, result: FilterResult) -> str:
+    headings = {
+        "direct_order": "🔥 НАЙДЕН ПРЯМОЙ 3D-ЗАКАЗ",
+        "freelance_vacancy": "Контрактная 3D-вакансия",
+        "job_vacancy": "Вакансия по 3D",
+    }
+    category_names = {
+        "direct_order": "прямой заказ",
+        "freelance_vacancy": "контрактная вакансия",
+        "job_vacancy": "вакансия",
+    }
+    date_text = job.published_at.strftime("%d.%m.%Y %H:%M UTC") if job.published_at else "не указано"
+    excerpt = (job.excerpt or job.description)[:900] or "—"
+    priority = opportunity_priority(job)
+    fields = [
+        f"<b>{headings[result.category]}</b>",
+        "💰 <b>ВЫСОКИЙ ПОТЕНЦИАЛ ДОХОДА</b>" if priority == "HIGH" else None,
+        f"<b>Тип:</b> {category_names[result.category]}",
+        f"<b>Название:</b> {html.escape(job.title or 'Без названия')}",
+        f"<b>Компания:</b> {html.escape(job.company or 'не указана')}",
+        f"<b>Источник:</b> {html.escape(job.source)}",
+        f"<b>Зарплата / бюджет:</b> {html.escape(job.salary_raw or 'не указан')}",
+        f"<b>Локация:</b> {html.escape(job.location or 'remote / не указана')}",
+        f"<b>Опубликовано:</b> {date_text}",
+        f"<b>Причина:</b> {html.escape(result.reason)}",
+        "",
+        html.escape(excerpt),
+        f"<b>Ссылка:</b> {html.escape(job.url)}" if job.url else "",
+    ]
+    return "\n".join(field for field in fields if field is not None)
+
+
+async def process_external_provider(
+    provider: ExternalProvider,
+    state: ExternalState,
+    settings: Any,
+    send: Callable[[str], Awaitable[None]],
+    *,
+    now: datetime | None = None,
+    evaluator: Callable[[str, str, str], FilterResult] = evaluate,
+) -> int:
+    """Обрабатывает один provider; ошибка API остаётся локальной для него."""
+    current = (now or datetime.now(UTC)).astimezone(UTC)
+    if not state.is_due(provider.name, provider.interval_minutes, current):
+        logging.info("Внешний источник %s пока не требует опроса", provider.name)
+        return 0
+    try:
+        jobs = await asyncio.to_thread(provider.fetch_jobs)
+    except Exception:
+        logging.exception("Не удалось получить объявления %s; остальные источники продолжат работу", provider.name)
+        return 0
+
+    first_run = not state.is_initialized(provider.name)
+    cutoff = current - BACKFILL_WINDOW
+    sent = 0
+    completed = True
+    entries: list[tuple[ExternalJob, FilterResult, bool, bool]] = []
+    for job in jobs:
+        if state.is_processed(job):
+            continue
+        eligible_for_initial = not first_run or (job.published_at is not None and job.published_at >= cutoff)
+        result = evaluator(job.raw_text, "general", "job_board")
+        if not external_3d_relevant(job):
+            result = FilterResult("rejected", "нет сильного признака 3D-роли или 3D-задачи во внешней вакансии", result.price)
+        is_candidate = eligible_for_initial and should_send(result, settings)
+        duplicate = is_candidate and state.has_fingerprint(job)
+        entries.append((job, result, is_candidate, duplicate))
+
+    selected_initial_ids: set[str] = set()
+    selected_initial_rank: dict[str, int] = {}
+    if first_run:
+        priority_rank = {"HIGH": 0, "NORMAL": 1, "UNKNOWN": 2}
+        initial_candidates = [entry for entry in entries if entry[2] and not entry[3]]
+        initial_candidates.sort(
+            key=lambda entry: (
+                priority_rank[opportunity_priority(entry[0])],
+                -(entry[0].published_at.timestamp() if entry[0].published_at else 0),
+            )
+        )
+        selected_initial_rank = {entry[0].external_id: index for index, entry in enumerate(initial_candidates[:MAX_INITIAL_NOTIFICATIONS])}
+        selected_initial_ids = set(selected_initial_rank)
+        # Избранная десятка должна отправляться именно в ранжированном порядке,
+        # а не в том порядке, в котором API вернул объявления.
+        entries.sort(key=lambda entry: (0, selected_initial_rank[entry[0].external_id]) if entry[0].external_id in selected_initial_rank else (1, 0))
+
+    for job, result, is_candidate, duplicate in entries:
+        try:
+            should_notify = is_candidate and not duplicate and (not first_run or job.external_id in selected_initial_ids)
+            if should_notify:
+                await send(format_external_card(job, result))
+                sent += 1
+                state.mark_fingerprint(job, current)
+            elif is_candidate and duplicate:
+                state.mark_fingerprint(job, current)
+        except Exception:
+            logging.exception("Не удалось отправить внешнее объявление %s/%s; оно будет повторено", job.source, job.external_id)
+            completed = False
+            continue
+        state.mark_processed(job, current)
+        state.save()
+
+    # Не сдвигаем интервал, если часть ответа не удалось обработать/доставить:
+    # при следующем запуске необработанное объявление будет повторено.
+    if completed:
+        state.finish_poll(provider.name, current)
+    state.prune(current)
+    state.save()
+    return sent
+
+
+async def process_external_sources(
+    providers: list[ExternalProvider], state: ExternalState, settings: Any, send: Callable[[str], Awaitable[None]], *, now: datetime | None = None
+) -> int:
+    total = 0
+    for provider in providers:
+        try:
+            total += await process_external_provider(provider, state, settings, send, now=now)
+        except Exception:
+            logging.exception("Ошибка внешнего источника %s не остановила остальные", provider.name)
+    return total

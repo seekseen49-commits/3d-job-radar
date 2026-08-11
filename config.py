@@ -24,6 +24,12 @@ class Settings:
     log_level: str
     send_job_vacancies: bool
     send_freelance_vacancies: bool
+    himalayas_enabled: bool
+    himalayas_poll_interval_minutes: int
+    jobicy_enabled: bool
+    jobicy_poll_interval_minutes: int
+    remotive_enabled: bool
+    remotive_poll_interval_minutes: int
 
 
 def _required(name: str) -> str:
@@ -31,6 +37,18 @@ def _required(name: str) -> str:
     if not value:
         raise ValueError(f"В .env не задано обязательное значение {name}")
     return value
+
+
+def _bool(name: str, default: bool) -> bool:
+    return os.getenv(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _positive_int(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)).strip())
+    except ValueError:
+        return default
+    return value if value > 0 else default
 
 
 def load_settings() -> Settings:
@@ -50,6 +68,12 @@ def load_settings() -> Settings:
         database_path=BASE_DIR / (os.getenv("DATABASE_PATH", "orders.sqlite3").strip() or "orders.sqlite3"),
         sources_path=BASE_DIR / (os.getenv("SOURCES_PATH", "sources.json").strip() or "sources.json"),
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
-        send_job_vacancies=os.getenv("SEND_JOB_VACANCIES", "false").strip().lower() in {"1", "true", "yes", "on"},
-        send_freelance_vacancies=os.getenv("SEND_FREELANCE_VACANCIES", "true").strip().lower() in {"1", "true", "yes", "on"},
+        send_job_vacancies=_bool("SEND_JOB_VACANCIES", False),
+        send_freelance_vacancies=_bool("SEND_FREELANCE_VACANCIES", True),
+        himalayas_enabled=_bool("HIMALAYAS_ENABLED", True),
+        himalayas_poll_interval_minutes=_positive_int("HIMALAYAS_POLL_INTERVAL_MINUTES", 1440),
+        jobicy_enabled=_bool("JOBICY_ENABLED", True),
+        jobicy_poll_interval_minutes=_positive_int("JOBICY_POLL_INTERVAL_MINUTES", 60),
+        remotive_enabled=_bool("REMOTIVE_ENABLED", True),
+        remotive_poll_interval_minutes=_positive_int("REMOTIVE_POLL_INTERVAL_MINUTES", 360),
     )
