@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import logging
 from dataclasses import dataclass
@@ -15,6 +16,9 @@ from typing import Any, Callable
 from config import Settings, load_settings
 from filters import FilterResult, evaluate
 from telegram_runtime import session_for_settings
+from application_method import detect_application, format_application_block
+from work_metadata import analyze_work_metadata
+from recipients import send_to_recipients
 
 
 STATE_PATH = Path(__file__).resolve().parent / "state" / "last_seen.json"
@@ -76,18 +80,13 @@ def format_card(source: Source, text: str, result: FilterResult, date: Any, mess
     title = next((line.strip() for line in text.splitlines() if line.strip()), "Публикация без текста")[:200]
     date_text = date.astimezone(timezone.utc).strftime("%d.%m.%Y %H:%M UTC") if date else "неизвестна"
     link = message_link(source, message_id)
-    headings = {
-        "direct_order": "🔥 НАЙДЕН ПРЯМОЙ 3D-ЗАКАЗ",
-        "freelance_vacancy": "Контрактная 3D-вакансия",
-        "job_vacancy": "Вакансия по 3D",
-    }
-    link_text = f"\nСсылка: {link}" if link else ""
-    return (
-        f"<b>{headings[result.category]}</b>\n<b>Название:</b> {title}\n"
-        f"<b>Канал:</b> {source.name}\n<b>Цена:</b> {result.price}\n"
-        f"<b>Причина:</b> {result.reason}\n<b>Дата:</b> {date_text}{link_text}\n\n"
-        f"<b>Исходный текст:</b>\n{text or '—'}"
-    )
+    application = detect_application(text, "Telegram", link)
+    headings = {"direct_order": "3D-ЗАКАЗ", "freelance_vacancy": "3D-КОНТРАКТ / ФРИЛАНС", "job_vacancy": "3D-ВАКАНСИЯ"}
+    metadata = analyze_work_metadata(text)
+    preview = text[:600].rstrip() + ("…" if len(text) > 600 else "")
+    payment = {"crypto_explicit": "КРИПТА", "fiat_explicit": "ФИАТ", "mixed": "КРИПТА / ФИАТ", "unknown": "НЕ УКАЗАН"}[metadata.payment_method]
+    blocks = [f"<b>{headings[result.category]}</b>", f"<b>{html.escape(title).upper()}</b>", f"<b>ОПЛАТА</b>\n{html.escape(result.price)}" if result.price != "не указана" else None, f"<b>РАБОТА ИЗ РОССИИ</b>\n{'ДА' if metadata.russia_eligibility == 'allowed' else 'НЕИЗВЕСТНО'}", f"<b>СПОСОБ ПОЛУЧЕНИЯ ОПЛАТЫ</b>\n{payment}", f"<b>ОПИСАНИЕ</b>\n\n<blockquote>{html.escape(preview)}</blockquote>" if preview else None, f"<b>КАК ОТКЛИКНУТЬСЯ</b>\n{format_application_block(application, link)}", f"<b>ИСТОЧНИК</b>\n{html.escape(source.name)}"]
+    return "\n\n".join(block for block in blocks if block)
 
 
 def should_send(result: FilterResult, settings: Settings) -> bool:
@@ -124,6 +123,8 @@ async def process_source(
         text = getattr(message, "raw_text", "") or ""
         try:
             result = evaluator(text, source.mode, source.source_type)
+            if analyze_work_metadata(text).russia_eligibility == "blocked":
+                result = FilterResult("rejected", "работа явно недоступна из России", result.price)
             if should_send(result, settings):
                 await send(format_card(source, text, result, getattr(message, "date", None), message_id))
         except Exception:
@@ -164,7 +165,7 @@ async def run_telegram_once() -> None:
         if not await client.is_user_authorized():
             raise RuntimeError("Аккаунт-сборщик не авторизован")
         async def send(card: str) -> None:
-            await bot.send_message(settings.owner_chat_id, card)
+            await send_to_recipients(bot, settings.recipient_chat_ids, card)
         total = await process_sources(load_sources(settings.sources_path), client, state, settings, send)
         logging.info("Одноразовая проверка завершена: обработано сообщений %s", total)
     finally:
@@ -188,7 +189,7 @@ async def run_once() -> None:
     bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     try:
         async def send(card: str) -> None:
-            await bot.send_message(settings.owner_chat_id, card)
+            await send_to_recipients(bot, settings.recipient_chat_ids, card)
 
         providers = []
         if settings.himalayas_enabled:

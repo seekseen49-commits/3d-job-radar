@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
+from recipients import parse_recipient_chat_ids
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -17,6 +18,7 @@ class Settings:
     api_hash: str
     bot_token: str
     owner_chat_id: int
+    recipient_chat_ids: tuple[int, ...]
     telethon_session: str
     telethon_string_session: str | None
     database_path: Path
@@ -63,6 +65,7 @@ def load_settings() -> Settings:
         api_hash=_required("TELEGRAM_API_HASH"),
         bot_token=_required("BOT_TOKEN"),
         owner_chat_id=owner_chat_id,
+        recipient_chat_ids=parse_recipient_chat_ids(owner_chat_id, os.getenv("ADDITIONAL_RECIPIENT_CHAT_IDS")),
         telethon_session=os.getenv("TELETHON_SESSION", "collector").strip() or "collector",
         telethon_string_session=os.getenv("TELETHON_STRING_SESSION", "").strip() or None,
         database_path=BASE_DIR / (os.getenv("DATABASE_PATH", "orders.sqlite3").strip() or "orders.sqlite3"),

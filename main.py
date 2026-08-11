@@ -20,6 +20,7 @@ from config import Settings, load_settings
 from database import Database
 from filters import FilterResult, evaluate
 from telegram_runtime import connect_with_retry, run_channel_handler, session_for_settings, shutdown_resources
+from recipients import send_to_recipients
 
 
 @dataclass(frozen=True)
@@ -95,6 +96,10 @@ def build_dispatcher(settings: Settings, db: Database, sources_path: Path) -> Di
     @dp.message(Command("start"))
     async def start(message: Message) -> None:
         await message.answer(f"Бот работает. Ваш chat_id: <code>{message.chat.id}</code>")
+
+    @dp.message(Command("id"))
+    async def show_chat_id(message: Message) -> None:
+        await message.answer(f"Ваш Chat ID:\n<code>{message.chat.id}</code>")
 
     @dp.message(Command("status"))
     async def status(message: Message) -> None:
@@ -179,7 +184,7 @@ async def run(stop_event: asyncio.Event | None = None) -> None:
                 return
             if db.notifications_paused():
                 return
-            await bot.send_message(settings.owner_chat_id, card(source, text, result, event.message.date, event.id))
+            await send_to_recipients(bot, settings.recipient_chat_ids, card(source, text, result, event.message.date, event.id))
             db.increment_sent()
         await run_channel_handler(process)
 

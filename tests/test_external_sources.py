@@ -1,4 +1,5 @@
 import tempfile
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -138,8 +139,8 @@ class ExternalSourcesTests(unittest.IsolatedAsyncioTestCase):
         ]
         await process_external_provider(Provider("Categories", jobs), self.state, SETTINGS, self.send, now=NOW)
         self.assertEqual(len(self.sent), 2)
-        self.assertTrue(any("ПРЯМОЙ" in card for card in self.sent))
-        self.assertTrue(any("Контрактная" in card for card in self.sent))
+        self.assertTrue(any("3D-ЗАКАЗ" in card for card in self.sent))
+        self.assertTrue(any("3D-КОНТРАКТ / ФРИЛАНС" in card for card in self.sent))
 
     async def test_first_backfill_prioritizes_high_then_newer_and_limits_to_ten(self):
         jobs = [ranked_job("high-old", "HIGH", age_hours=5), ranked_job("high-new", "HIGH", age_hours=1)]
@@ -171,6 +172,16 @@ class ExternalSourcesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(opportunity_priority(non_3d), "HIGH")
         await process_external_provider(Provider("BadHigh", [non_3d]), self.state, SimpleNamespace(send_freelance_vacancies=True, send_job_vacancies=True), self.send, now=NOW)
         self.assertEqual(self.sent, [])
+
+    async def test_backfill_uses_application_method_after_financial_priority(self):
+        high_platform = ranked_job("high-platform", "HIGH")
+        normal_direct = replace(ranked_job("normal-direct", "NORMAL"), description="Write to @client3d")
+        high_external = replace(ranked_job("high-external", "HIGH"), application_link="https://boards.greenhouse.io/apply")
+        high_direct = replace(ranked_job("high-direct", "HIGH"), description="Write to @client3d")
+        await process_external_provider(Provider("ApplicationRank", [high_external, normal_direct, high_platform, high_direct]), self.state, SETTINGS, self.send, now=NOW)
+        cards = "\n---\n".join(self.sent)
+        self.assertLess(cards.index("HIGH-DIRECT"), cards.index("HIGH-EXTERNAL"))
+        self.assertLess(cards.index("HIGH-PLATFORM"), cards.index("NORMAL-DIRECT"))
 
 
 class ExternalParsingAndRelevanceTests(unittest.TestCase):

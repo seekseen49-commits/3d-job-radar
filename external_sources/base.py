@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Protocol
 
 from filters import FilterResult, evaluate
+from application_method import application_rank, detect_application, format_application_block
+from work_metadata import analyze_work_metadata
 
 
 STATE_PATH = Path(__file__).resolve().parent.parent / "state" / "external_sources.json"
@@ -40,10 +42,31 @@ class ExternalJob:
     currency: str = ""
     salary_period: str = ""
     contract_duration: str = ""
+    application_link: str = ""
 
     @property
     def raw_text(self) -> str:
         return "\n".join(part for part in (self.title, self.excerpt, self.description) if part).strip()
+
+    @property
+    def application_info(self):
+        return detect_application(self.raw_text, self.source, self.url, self.application_link)
+
+    @property
+    def application_method(self) -> str:
+        return self.application_info.method
+
+    @property
+    def application_url(self) -> str | None:
+        return self.application_info.application_url
+
+    @property
+    def application_contact(self) -> tuple[str, ...]:
+        return self.application_info.contacts
+
+    @property
+    def metadata(self):
+        return analyze_work_metadata(self.raw_text, self.location)
 
 
 # Эти шаблоны намеренно описывают профессию или задачу, а не случайный термин
@@ -231,35 +254,26 @@ def should_send(result: FilterResult, settings: Any) -> bool:
 
 
 def format_external_card(job: ExternalJob, result: FilterResult) -> str:
-    headings = {
-        "direct_order": "🔥 НАЙДЕН ПРЯМОЙ 3D-ЗАКАЗ",
-        "freelance_vacancy": "Контрактная 3D-вакансия",
-        "job_vacancy": "Вакансия по 3D",
-    }
-    category_names = {
-        "direct_order": "прямой заказ",
-        "freelance_vacancy": "контрактная вакансия",
-        "job_vacancy": "вакансия",
-    }
+    headings = {"direct_order": "3D-ЗАКАЗ", "freelance_vacancy": "3D-КОНТРАКТ / ФРИЛАНС", "job_vacancy": "3D-ВАКАНСИЯ"}
     date_text = job.published_at.strftime("%d.%m.%Y %H:%M UTC") if job.published_at else "не указано"
-    excerpt = (job.excerpt or job.description)[:900] or "—"
+    excerpt = job.excerpt or job.description
+    excerpt = (excerpt[:600].rstrip() + "…") if len(excerpt) > 600 else excerpt
     priority = opportunity_priority(job)
+    application = job.application_info
+    metadata = job.metadata
+    payment = {"crypto_explicit": "КРИПТА", "fiat_explicit": "ФИАТ", "mixed": "КРИПТА / ФИАТ", "unknown": "НЕ УКАЗАН"}[metadata.payment_method]
+    eligibility = {"allowed": "ДА", "unknown": "НЕИЗВЕСТНО"}[metadata.russia_eligibility]
     fields = [
-        f"<b>{headings[result.category]}</b>",
-        "💰 <b>ВЫСОКИЙ ПОТЕНЦИАЛ ДОХОДА</b>" if priority == "HIGH" else None,
-        f"<b>Тип:</b> {category_names[result.category]}",
-        f"<b>Название:</b> {html.escape(job.title or 'Без названия')}",
-        f"<b>Компания:</b> {html.escape(job.company or 'не указана')}",
-        f"<b>Источник:</b> {html.escape(job.source)}",
-        f"<b>Зарплата / бюджет:</b> {html.escape(job.salary_raw or 'не указан')}",
-        f"<b>Локация:</b> {html.escape(job.location or 'remote / не указана')}",
-        f"<b>Опубликовано:</b> {date_text}",
-        f"<b>Причина:</b> {html.escape(result.reason)}",
-        "",
-        html.escape(excerpt),
-        f"<b>Ссылка:</b> {html.escape(job.url)}" if job.url else "",
+        "<b>ВЫСОКИЙ ПОТЕНЦИАЛ ДОХОДА</b>" if priority == "HIGH" else None,
+        f"<b>{headings[result.category]}</b>", f"<b>{html.escape(job.title or 'БЕЗ НАЗВАНИЯ').upper()}</b>",
+        f"<b>ОПЛАТА</b>\n{html.escape(job.salary_raw)}" if job.salary_raw else None,
+        f"<b>ФОРМАТ</b>\n{html.escape(' / '.join(x for x in (job.job_type, job.location) if x))}" if job.job_type or job.location else None,
+        f"<b>РАБОТА ИЗ РОССИИ</b>\n{eligibility}", f"<b>СПОСОБ ПОЛУЧЕНИЯ ОПЛАТЫ</b>\n{payment}{(': ' + html.escape(metadata.payment_details)) if metadata.payment_details else ''}",
+        f"<b>ОПИСАНИЕ</b>\n\n<blockquote>{html.escape(excerpt)}</blockquote>" if excerpt else None,
+        f"<b>КАК ОТКЛИКНУТЬСЯ</b>\n{format_application_block(application, job.url)}",
+        f"<b>ИСТОЧНИК</b>\n{html.escape(job.source)}",
     ]
-    return "\n".join(field for field in fields if field is not None)
+    return "\n\n".join(field for field in fields if field)
 
 
 async def process_external_provider(
@@ -294,6 +308,8 @@ async def process_external_provider(
         result = evaluator(job.raw_text, "general", "job_board")
         if not external_3d_relevant(job):
             result = FilterResult("rejected", "нет сильного признака 3D-роли или 3D-задачи во внешней вакансии", result.price)
+        if job.metadata.russia_eligibility == "blocked":
+            result = FilterResult("rejected", "работа явно недоступна из России", result.price)
         is_candidate = eligible_for_initial and should_send(result, settings)
         duplicate = is_candidate and state.has_fingerprint(job)
         entries.append((job, result, is_candidate, duplicate))
@@ -306,6 +322,7 @@ async def process_external_provider(
         initial_candidates.sort(
             key=lambda entry: (
                 priority_rank[opportunity_priority(entry[0])],
+                application_rank(entry[0].application_info),
                 -(entry[0].published_at.timestamp() if entry[0].published_at else 0),
             )
         )

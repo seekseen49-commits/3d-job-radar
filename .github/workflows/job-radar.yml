@@ -20,6 +20,7 @@ jobs:
       TELETHON_STRING_SESSION: ${{ secrets.TELETHON_STRING_SESSION }}
       BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
       OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
+      ADDITIONAL_RECIPIENT_CHAT_IDS: ${{ secrets.ADDITIONAL_RECIPIENT_CHAT_IDS }}
       SEND_FREELANCE_VACANCIES: "true"
       SEND_JOB_VACANCIES: "true"
     steps:

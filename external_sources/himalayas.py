@@ -41,7 +41,9 @@ class HimalayasSource:
         if isinstance(location, list):
             location = ", ".join(str(part) for part in location)
         title, description = html_to_text(row.get("title")), html_to_text(row.get("description"))
-        return ExternalJob("Himalayas", str(row["guid"]), title, description, str(row.get("applicationLink") or ""), parse_datetime(row.get("pubDate")), html_to_text(row.get("companyName")), html_to_text(row.get("employmentType")), html_to_text(location), salary, html_to_text(row.get("excerpt")), _number(row.get("minSalary")), _number(row.get("maxSalary")), str(row.get("currency") or ""), str(row.get("salaryPeriod") or ""), contract_duration_from_text(title, description))
+        application_link = str(row.get("applicationLink") or "")
+        source_url = str(row.get("url") or row.get("jobUrl") or application_link)
+        return ExternalJob("Himalayas", str(row["guid"]), title, description, source_url, parse_datetime(row.get("pubDate")), html_to_text(row.get("companyName")), html_to_text(row.get("employmentType")), html_to_text(location), salary, html_to_text(row.get("excerpt")), _number(row.get("minSalary")), _number(row.get("maxSalary")), str(row.get("currency") or ""), str(row.get("salaryPeriod") or ""), contract_duration_from_text(title, description), application_link)
 
 
 def _number(value: Any) -> float | None:
