@@ -209,6 +209,19 @@ async def run_himalayas_diagnostic(settings: Settings, *, provider: Any = None, 
     logging.info("Himalayas diagnostic mode: DONE")
 
 
+def select_external_providers(settings: Any, mcp_factory: Any, himalayas_factory: Any, jobicy_factory: Any, remotive_factory: Any) -> list[Any]:
+    providers = []
+    if settings.himalayas_mcp_enabled:
+        providers.append(mcp_factory(settings.himalayas_mcp_poll_minutes))
+    if settings.himalayas_enabled:
+        providers.append(himalayas_factory(settings.himalayas_poll_interval_minutes))
+    if settings.jobicy_enabled:
+        providers.append(jobicy_factory(settings.jobicy_poll_interval_minutes))
+    if settings.remotive_enabled:
+        providers.append(remotive_factory(settings.remotive_poll_interval_minutes))
+    return providers
+
+
 async def run_once() -> None:
     """Telegram и внешние доски изолированы: сбой одного контура не останавливает другой."""
     try:
@@ -238,19 +251,13 @@ async def run_once() -> None:
             if not await send_to_recipients(bot, settings.recipient_chat_ids, card):
                 raise RuntimeError("Уведомление не доставлено ни одному получателю")
 
-        providers = []
-        if settings.himalayas_mcp_enabled:
-            providers.append(HimalayasMcpSource(settings.himalayas_mcp_poll_minutes))
-        if settings.himalayas_enabled:
-            providers.append(HimalayasSource(settings.himalayas_poll_interval_minutes))
-        if settings.jobicy_enabled:
-            providers.append(JobicySource(settings.jobicy_poll_interval_minutes))
-        if settings.remotive_enabled:
-            providers.append(RemotiveSource(settings.remotive_poll_interval_minutes))
-            total = await process_external_sources(
-                providers, ExternalState(), settings, send,
-                himalayas_recovery=settings.himalayas_recovery_backfill,
-            )
+        providers = select_external_providers(
+            settings, HimalayasMcpSource, HimalayasSource, JobicySource, RemotiveSource,
+        )
+        total = await process_external_sources(
+            providers, ExternalState(), settings, send,
+            himalayas_recovery=settings.himalayas_recovery_backfill,
+        )
         logging.info("Проверка внешних источников завершена: отправлено %s", total)
     except Exception:
         logging.exception("Ошибка внешнего контура не влияет на Telegram")

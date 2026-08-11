@@ -34,6 +34,7 @@ jobs:
       ADDITIONAL_RECIPIENT_CHAT_IDS: ${{ secrets.ADDITIONAL_RECIPIENT_CHAT_IDS }}
       HIMALAYAS_RECOVERY_BACKFILL: ${{ inputs.himalayas_recovery_backfill || 'false' }}
       HIMALAYAS_DIAGNOSTIC: ${{ inputs.himalayas_diagnostic || 'false' }}
+      HIMALAYAS_MCP_ENABLED: "false"
       SEND_FREELANCE_VACANCIES: "true"
       SEND_JOB_VACANCIES: "true"
     steps:

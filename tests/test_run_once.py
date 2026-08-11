@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 from external_sources.base import ExternalJob, ExternalState
 from filters import FilterResult
 import run_once as run_once_module
-from run_once import LastSeenState, Source, process_source, process_sources, run_himalayas_diagnostic
+from run_once import LastSeenState, Source, process_source, process_sources, run_himalayas_diagnostic, select_external_providers
 
 
 class Message:
@@ -178,3 +178,31 @@ class HimalayasDiagnosticEntrypointTests(unittest.IsolatedAsyncioTestCase):
         ):
             await run_once_module.run_once()
         diagnostic.assert_awaited_once_with(diagnostic_settings)
+
+
+class ExternalProviderSelectionTests(unittest.TestCase):
+    def test_mcp_is_disabled_by_default_without_affecting_other_external_sources(self):
+        settings = SimpleNamespace(
+            himalayas_mcp_enabled=False, himalayas_mcp_poll_minutes=10,
+            himalayas_enabled=True, himalayas_poll_interval_minutes=1440,
+            jobicy_enabled=True, jobicy_poll_interval_minutes=60,
+            remotive_enabled=True, remotive_poll_interval_minutes=360,
+        )
+        created = []
+
+        def factory(name):
+            def create(interval):
+                created.append((name, interval))
+                return name
+            return create
+
+        providers = select_external_providers(
+            settings, factory("mcp"), factory("himalayas"), factory("jobicy"), factory("remotive"),
+        )
+        self.assertEqual(providers, ["himalayas", "jobicy", "remotive"])
+        self.assertNotIn(("mcp", 10), created)
+
+    def test_config_default_for_mcp_is_false(self):
+        from config import _bool
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertFalse(_bool("HIMALAYAS_MCP_ENABLED", False))
