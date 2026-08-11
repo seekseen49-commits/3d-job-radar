@@ -3,7 +3,7 @@ name: 3D Job Radar
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "2-59/5 * * * *"
 
 permissions:
   contents: write
@@ -22,6 +22,8 @@ jobs:
       TELETHON_STRING_SESSION: ${{ secrets.TELETHON_STRING_SESSION }}
       BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
       OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
+      FREELANCER_ENABLED: "true"
+      FREELANCER_OAUTH_TOKEN: ${{ secrets.FREELANCER_OAUTH_TOKEN }}
       SEND_FREELANCE_VACANCIES: "true"
       SEND_JOB_VACANCIES: "false"
     steps:
@@ -37,12 +39,12 @@ jobs:
         run: python run_once.py
       - name: Persist last seen IDs
         run: |
-          if git diff --quiet -- state/last_seen.json; then
+          if git diff --quiet -- state/last_seen.json state/freelancer_last_seen.json; then
             echo "State unchanged; no commit."
           else
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add -- state/last_seen.json
+            git add -- state/last_seen.json state/freelancer_last_seen.json
             git commit -m "chore: update job radar state"
             git push origin HEAD:main
           fi
