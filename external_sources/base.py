@@ -22,6 +22,7 @@ STATE_PATH = Path(__file__).resolve().parent.parent / "state" / "external_source
 BACKFILL_WINDOW = timedelta(hours=72)
 STATE_RETENTION = timedelta(days=30)
 MAX_INITIAL_NOTIFICATIONS = 10
+HIMALAYAS_RECOVERY_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -280,7 +281,7 @@ class ExternalState:
         self.values["initialized"][source] = True
 
     def recovery_completed(self) -> bool:
-        return self.recovery_version() >= 2
+        return self.recovery_version() >= HIMALAYAS_RECOVERY_VERSION
 
     def recovery_version(self) -> int:
         value = self.values.get("himalayas_recovery_version")
@@ -290,7 +291,7 @@ class ExternalState:
 
     def mark_recovery_completed(self) -> None:
         self.values["himalayas_recovery_72h_completed"] = True
-        self.values["himalayas_recovery_version"] = 2
+        self.values["himalayas_recovery_version"] = HIMALAYAS_RECOVERY_VERSION
 
     def prune(self, now: datetime) -> None:
         cutoff = now - STATE_RETENTION
@@ -402,7 +403,7 @@ async def process_external_provider(
     is_recovery = recovery and provider.name == "Himalayas"
     is_diagnostic = diagnostic and provider.name == "Himalayas"
     if is_recovery and state.recovery_completed():
-        logging.info("Himalayas recovery v2 already completed")
+        logging.info("Himalayas recovery v%s already completed", HIMALAYAS_RECOVERY_VERSION)
         return 0
     if not is_recovery and not is_diagnostic and not state.is_due(provider.name, provider.interval_minutes, current):
         logging.info("Внешний источник %s пока не требует опроса", provider.name)

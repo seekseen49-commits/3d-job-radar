@@ -6,11 +6,12 @@ from pathlib import Path
 from types import SimpleNamespace
 import unittest
 
-from external_sources.base import ExternalJob, ExternalState, contract_duration_from_text, external_3d_reason, external_3d_relevant, format_external_card, html_to_text, opportunity_priority, process_external_provider, process_external_sources
+from external_sources.base import HIMALAYAS_RECOVERY_VERSION, ExternalJob, ExternalState, contract_duration_from_text, external_3d_reason, external_3d_relevant, format_external_card, html_to_text, opportunity_priority, process_external_provider, process_external_sources
 from external_sources.himalayas import HimalayasSource
 from external_sources.jobicy import JobicySource
 from external_sources.remotive import RemotiveSource
 from filters import evaluate
+from recipients import send_to_recipients
 
 
 NOW = datetime(2026, 8, 11, 12, tzinfo=UTC)
@@ -192,6 +193,7 @@ class ExternalSourcesTests(unittest.IsolatedAsyncioTestCase):
         await process_external_provider(provider, self.state, SETTINGS, self.send, now=NOW, recovery=True)
         self.assertEqual(len(self.sent), 1)
         self.assertTrue(self.state.recovery_completed())
+        self.assertEqual(self.state.recovery_version(), HIMALAYAS_RECOVERY_VERSION)
         self.assertTrue(self.state.is_processed(item))
         self.assertTrue(self.state.is_initialized("Himalayas"))
         await process_external_provider(provider, self.state, SETTINGS, self.send, now=NOW, recovery=True)
@@ -206,6 +208,61 @@ class ExternalSourcesTests(unittest.IsolatedAsyncioTestCase):
         self.state.mark_fingerprint(sent_item, NOW - timedelta(days=1))
         await process_external_provider(provider, self.state, SETTINGS, self.send, now=NOW, recovery=True)
         self.assertEqual(self.sent, [])
+
+    async def test_recovery_v3_runs_from_stored_v2_then_skips_repeat(self):
+        item = ranked_job("v3-from-v2", "HIGH")
+        provider = Provider("Himalayas", [item])
+        self.state.values["himalayas_recovery_version"] = 2
+        self.state.mark_processed(item, NOW - timedelta(days=1))
+        self.assertEqual(HIMALAYAS_RECOVERY_VERSION, 3)
+        self.assertFalse(self.state.recovery_completed())
+        await process_external_provider(provider, self.state, SETTINGS, self.send, now=NOW, recovery=True)
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual(self.state.recovery_version(), 3)
+        with self.assertLogs(level="INFO") as logs:
+            self.assertEqual(
+                await process_external_provider(provider, self.state, SETTINGS, self.send, now=NOW, recovery=True),
+                0,
+            )
+        self.assertIn("Himalayas recovery v3 already completed", "\n".join(logs.output))
+
+    async def test_recovery_v3_delivers_to_all_recipients_and_marks_after_delivery(self):
+        item = ranked_job("v3-recipients", "HIGH")
+        self.state.values["himalayas_recovery_version"] = 2
+
+        class Bot:
+            def __init__(self):
+                self.chat_ids = []
+
+            async def send_message(self, chat_id, _text):
+                self.chat_ids.append(chat_id)
+
+        bot = Bot()
+
+        async def send(card):
+            self.assertTrue(await send_to_recipients(bot, (101, 202, 303), card))
+
+        await process_external_provider(
+            Provider("Himalayas", [item]), self.state, SETTINGS, send, now=NOW, recovery=True,
+        )
+        self.assertEqual(bot.chat_ids, [101, 202, 303])
+        self.assertTrue(self.state.has_fingerprint(item))
+
+    async def test_recovery_v3_allows_unknown_russia_but_rejects_blocked(self):
+        allowed_unknown = ranked_job("unknown-eligibility", "HIGH")
+        blocked = replace(
+            ranked_job("blocked-russia", "HIGH"),
+            location="USA, Canada, UK", location_restrictions=["USA", "Canada", "UK"],
+        )
+        self.state.values["himalayas_recovery_version"] = 2
+        self.assertEqual(allowed_unknown.metadata.russia_eligibility, "unknown")
+        await process_external_provider(
+            Provider("Himalayas", [allowed_unknown, blocked]), self.state, SETTINGS, self.send,
+            now=NOW, recovery=True,
+        )
+        self.assertEqual(len(self.sent), 1)
+        self.assertTrue(self.state.has_fingerprint(allowed_unknown))
+        self.assertFalse(self.state.has_fingerprint(blocked))
 
     async def test_recovery_counters_only_count_recent_strong_3d_jobs(self):
         recent = ranked_job("recent-strong", "HIGH", age_hours=1)
