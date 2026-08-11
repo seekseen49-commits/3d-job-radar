@@ -184,7 +184,8 @@ async def run(stop_event: asyncio.Event | None = None) -> None:
                 return
             if db.notifications_paused():
                 return
-            await send_to_recipients(bot, settings.recipient_chat_ids, card(source, text, result, event.message.date, event.id))
+            if not await send_to_recipients(bot, settings.recipient_chat_ids, card(source, text, result, event.message.date, event.id)):
+                raise RuntimeError("Уведомление не доставлено ни одному получателю")
             db.increment_sent()
         await run_channel_handler(process)
 

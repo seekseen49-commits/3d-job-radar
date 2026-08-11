@@ -165,7 +165,8 @@ async def run_telegram_once() -> None:
         if not await client.is_user_authorized():
             raise RuntimeError("Аккаунт-сборщик не авторизован")
         async def send(card: str) -> None:
-            await send_to_recipients(bot, settings.recipient_chat_ids, card)
+            if not await send_to_recipients(bot, settings.recipient_chat_ids, card):
+                raise RuntimeError("Уведомление не доставлено ни одному получателю")
         total = await process_sources(load_sources(settings.sources_path), client, state, settings, send)
         logging.info("Одноразовая проверка завершена: обработано сообщений %s", total)
     finally:
@@ -183,22 +184,25 @@ async def run_once() -> None:
     from aiogram import Bot
     from aiogram.client.default import DefaultBotProperties
     from aiogram.enums import ParseMode
-    from external_sources import ExternalState, HimalayasSource, JobicySource, RemotiveSource, process_external_sources
+    from external_sources import ExternalState, HimalayasMcpSource, HimalayasSource, JobicySource, RemotiveSource, process_external_sources
 
     settings = load_settings()
     bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     try:
         async def send(card: str) -> None:
-            await send_to_recipients(bot, settings.recipient_chat_ids, card)
+            if not await send_to_recipients(bot, settings.recipient_chat_ids, card):
+                raise RuntimeError("Уведомление не доставлено ни одному получателю")
 
         providers = []
+        if settings.himalayas_mcp_enabled:
+            providers.append(HimalayasMcpSource(settings.himalayas_mcp_poll_minutes))
         if settings.himalayas_enabled:
             providers.append(HimalayasSource(settings.himalayas_poll_interval_minutes))
         if settings.jobicy_enabled:
             providers.append(JobicySource(settings.jobicy_poll_interval_minutes))
         if settings.remotive_enabled:
             providers.append(RemotiveSource(settings.remotive_poll_interval_minutes))
-        total = await process_external_sources(providers, ExternalState(), settings, send)
+            total = await process_external_sources(providers, ExternalState(), settings, send, himalayas_recovery=settings.himalayas_recovery_backfill)
         logging.info("Проверка внешних источников завершена: отправлено %s", total)
     except Exception:
         logging.exception("Ошибка внешнего контура не влияет на Telegram")

@@ -183,6 +183,29 @@ class ExternalSourcesTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(cards.index("HIGH-DIRECT"), cards.index("HIGH-EXTERNAL"))
         self.assertLess(cards.index("HIGH-PLATFORM"), cards.index("NORMAL-DIRECT"))
 
+    async def test_himalayas_recovery_reconsiders_processed_but_not_sent_jobs_once(self):
+        item = ranked_job("recovery", "HIGH")
+        provider = Provider("Himalayas", [item])
+        self.state.mark_processed(item, NOW - timedelta(days=1))
+        self.state.finish_poll("Himalayas", NOW - timedelta(days=1))
+        await process_external_provider(provider, self.state, SETTINGS, self.send, now=NOW, recovery=True)
+        self.assertEqual(len(self.sent), 1)
+        self.assertTrue(self.state.recovery_completed())
+        self.assertTrue(self.state.is_processed(item))
+        self.assertTrue(self.state.is_initialized("Himalayas"))
+        await process_external_provider(provider, self.state, SETTINGS, self.send, now=NOW, recovery=True)
+        self.assertEqual(len(self.sent), 1)
+
+    async def test_himalayas_recovery_skips_existing_sent_fingerprint_and_blocked_jobs(self):
+        sent_item = ranked_job("sent", "HIGH")
+        blocked_item = replace(ranked_job("blocked", "HIGH"), location="USA, Canada, UK")
+        provider = Provider("Himalayas", [sent_item, blocked_item])
+        for item in provider.jobs:
+            self.state.mark_processed(item, NOW - timedelta(days=1))
+        self.state.mark_fingerprint(sent_item, NOW - timedelta(days=1))
+        await process_external_provider(provider, self.state, SETTINGS, self.send, now=NOW, recovery=True)
+        self.assertEqual(self.sent, [])
+
 
 class ExternalParsingAndRelevanceTests(unittest.TestCase):
     def test_html_is_converted_to_plain_text(self):

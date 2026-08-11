@@ -21,5 +21,5 @@ class RecipientTests(unittest.IsolatedAsyncioTestCase):
                 if chat_id == 2: raise RuntimeError("blocked")
                 self.sent.append((chat_id, text))
         bot = Bot()
-        await send_to_recipients(bot, (1, 2, 3), "card")
+        self.assertTrue(await send_to_recipients(bot, (1, 2, 3), "card"))
         self.assertEqual(bot.sent, [(1, "card"), (3, "card")])

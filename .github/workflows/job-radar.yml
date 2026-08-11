@@ -2,6 +2,12 @@ name: 3D Job Radar
 
 on:
   workflow_dispatch:
+    inputs:
+      himalayas_recovery_backfill:
+        description: "One-time Himalayas 72h recovery backfill"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -21,6 +27,7 @@ jobs:
       BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
       OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
       ADDITIONAL_RECIPIENT_CHAT_IDS: ${{ secrets.ADDITIONAL_RECIPIENT_CHAT_IDS }}
+      HIMALAYAS_RECOVERY_BACKFILL: ${{ inputs.himalayas_recovery_backfill || 'false' }}
       SEND_FREELANCE_VACANCIES: "true"
       SEND_JOB_VACANCIES: "true"
     steps:

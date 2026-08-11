@@ -209,7 +209,7 @@ class ExternalState:
         self.values.setdefault("initialized", {})
 
     def is_due(self, source: str, interval_minutes: int, now: datetime) -> bool:
-        raw = self.values["last_poll_at"].get(source)
+        raw = self.values.get("himalayas_mcp_last_successful_poll_at") if source == "Himalayas MCP" else self.values["last_poll_at"].get(source)
         last = parse_datetime(raw)
         return last is None or now - last >= timedelta(minutes=interval_minutes)
 
@@ -230,7 +230,15 @@ class ExternalState:
 
     def finish_poll(self, source: str, now: datetime) -> None:
         self.values["last_poll_at"][source] = _timestamp(now)
+        if source == "Himalayas MCP":
+            self.values["himalayas_mcp_last_successful_poll_at"] = _timestamp(now)
         self.values["initialized"][source] = True
+
+    def recovery_completed(self) -> bool:
+        return self.values.get("himalayas_recovery_72h_completed") is True
+
+    def mark_recovery_completed(self) -> None:
+        self.values["himalayas_recovery_72h_completed"] = True
 
     def prune(self, now: datetime) -> None:
         cutoff = now - STATE_RETENTION
@@ -284,10 +292,15 @@ async def process_external_provider(
     *,
     now: datetime | None = None,
     evaluator: Callable[[str, str, str], FilterResult] = evaluate,
+    recovery: bool = False,
 ) -> int:
     """Обрабатывает один provider; ошибка API остаётся локальной для него."""
     current = (now or datetime.now(UTC)).astimezone(UTC)
-    if not state.is_due(provider.name, provider.interval_minutes, current):
+    is_recovery = recovery and provider.name == "Himalayas"
+    if is_recovery and state.recovery_completed():
+        logging.info("Himalayas recovery backfill already completed")
+        return 0
+    if not is_recovery and not state.is_due(provider.name, provider.interval_minutes, current):
         logging.info("Внешний источник %s пока не требует опроса", provider.name)
         return 0
     try:
@@ -297,14 +310,18 @@ async def process_external_provider(
         return 0
 
     first_run = not state.is_initialized(provider.name)
+    baseline_only = bool(getattr(provider, "baseline_only", False)) and first_run
     cutoff = current - BACKFILL_WINDOW
     sent = 0
     completed = True
     entries: list[tuple[ExternalJob, FilterResult, bool, bool]] = []
     for job in jobs:
-        if state.is_processed(job):
+        already_processed = state.is_processed(job)
+        if already_processed and not is_recovery:
             continue
         eligible_for_initial = not first_run or (job.published_at is not None and job.published_at >= cutoff)
+        if is_recovery:
+            eligible_for_initial = job.published_at is not None and job.published_at >= cutoff
         result = evaluator(job.raw_text, "general", "job_board")
         if not external_3d_relevant(job):
             result = FilterResult("rejected", "нет сильного признака 3D-роли или 3D-задачи во внешней вакансии", result.price)
@@ -316,7 +333,7 @@ async def process_external_provider(
 
     selected_initial_ids: set[str] = set()
     selected_initial_rank: dict[str, int] = {}
-    if first_run:
+    if first_run or is_recovery:
         priority_rank = {"HIGH": 0, "NORMAL": 1, "UNKNOWN": 2}
         initial_candidates = [entry for entry in entries if entry[2] and not entry[3]]
         initial_candidates.sort(
@@ -334,7 +351,7 @@ async def process_external_provider(
 
     for job, result, is_candidate, duplicate in entries:
         try:
-            should_notify = is_candidate and not duplicate and (not first_run or job.external_id in selected_initial_ids)
+            should_notify = is_candidate and not duplicate and not baseline_only and (not (first_run or is_recovery) or job.external_id in selected_initial_ids)
             if should_notify:
                 await send(format_external_card(job, result))
                 sent += 1
@@ -350,20 +367,22 @@ async def process_external_provider(
 
     # Не сдвигаем интервал, если часть ответа не удалось обработать/доставить:
     # при следующем запуске необработанное объявление будет повторено.
-    if completed:
+    if completed and not is_recovery:
         state.finish_poll(provider.name, current)
+    if completed and is_recovery:
+        state.mark_recovery_completed()
     state.prune(current)
     state.save()
     return sent
 
 
 async def process_external_sources(
-    providers: list[ExternalProvider], state: ExternalState, settings: Any, send: Callable[[str], Awaitable[None]], *, now: datetime | None = None
+    providers: list[ExternalProvider], state: ExternalState, settings: Any, send: Callable[[str], Awaitable[None]], *, now: datetime | None = None, himalayas_recovery: bool = False
 ) -> int:
     total = 0
     for provider in providers:
         try:
-            total += await process_external_provider(provider, state, settings, send, now=now)
+            total += await process_external_provider(provider, state, settings, send, now=now, recovery=himalayas_recovery)
         except Exception:
             logging.exception("Ошибка внешнего источника %s не остановила остальные", provider.name)
     return total
