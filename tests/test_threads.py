@@ -116,3 +116,13 @@ class ThreadsHttpSecurityTests(unittest.TestCase):
     def test_cyrillic_marks_russian_or_mixed_posts_only(self) -> None:
         self.assertTrue(is_russian_post("Ищу 3D-моделлера в Blender"))
         self.assertFalse(is_russian_post("Looking for a Blender artist"))
+
+    def test_meta_error_detail_does_not_include_request_url_or_token(self) -> None:
+        from urllib.error import HTTPError
+        from io import BytesIO
+        from external_sources.http import _safe_api_error_detail
+
+        error = HTTPError("https://graph.threads.net/keyword_search?secret", 403, "Forbidden", None, BytesIO(b'{"error":{"type":"OAuthException","code":10,"message":"Missing permission"}}'))
+        detail = _safe_api_error_detail(error)
+        self.assertIn("OAuthException", detail)
+        self.assertNotIn("secret", detail)
