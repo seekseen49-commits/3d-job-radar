@@ -53,9 +53,9 @@ class ThreadsSource:
         for query in THREADS_KEYWORDS:
             try:
                 payload = self._fetcher(self.request_url(query), self.access_token)
-            except Exception:
+            except Exception as exc:
                 self.had_query_error = True
-                logging.warning("Threads keyword query failed; remaining queries continue")
+                logging.warning("Threads keyword query failed (%s); remaining queries continue", exc)
                 continue
             rows = payload.get("data", []) if isinstance(payload, dict) else []
             for row in rows:

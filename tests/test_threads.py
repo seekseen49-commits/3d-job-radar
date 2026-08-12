@@ -94,6 +94,14 @@ class ThreadsSourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.state.is_processed(source._job(post("after-error"))))
         self.assertFalse(self.state.is_initialized("Threads"))
 
+    def test_keyword_error_log_does_not_contain_the_access_token(self) -> None:
+        source = ThreadsSource("secret-value", fetcher=lambda *_: (_ for _ in ()).throw(RuntimeError("HTTP 500")))
+        with self.assertLogs(level="WARNING") as logs:
+            source.fetch_jobs()
+        output = "\n".join(logs.output)
+        self.assertIn("HTTP 500", output)
+        self.assertNotIn("secret-value", output)
+
     async def test_missing_token_skips_without_changing_state(self) -> None:
         source = ThreadsSource("", fetcher=lambda *_: self.fail("must not call API"))
         before = dict(self.state.values)
