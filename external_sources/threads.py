@@ -16,7 +16,7 @@ from .http import fetch_json_with_bearer_token
 
 
 THREADS_KEYWORDS = ("3D", "3д", "Blender", "визуализатор", "смоделировать", "рендер")
-THREADS_SEARCH_ENDPOINT = "https://graph.threads.net/v1.0/keyword_search"
+THREADS_SEARCH_ENDPOINT = "https://graph.threads.net/keyword_search"
 THREADS_FIELDS = "id,text,permalink,timestamp,username"
 _CYRILLIC_RE = re.compile(r"[А-Яа-яЁё]")
 

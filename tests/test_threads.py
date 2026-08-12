@@ -48,6 +48,7 @@ class ThreadsSourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all("search_type=RECENT" in url and "q=" in url for url, _ in calls))
         self.assertTrue(all("secret-value" not in url for url, _ in calls))
         self.assertTrue(all(token == "secret-value" for _, token in calls))
+        self.assertTrue(all(url.startswith("https://graph.threads.net/keyword_search?") for url, _ in calls))
 
     async def test_russian_direct_order_is_sent_once_and_external_id_is_saved(self) -> None:
         source = self.source([post("one")])

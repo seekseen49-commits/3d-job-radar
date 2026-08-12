@@ -30,7 +30,9 @@ def fetch_json_with_bearer_token(url: str, token: str, timeout: int = 20, retrie
             last_error = exc
         if attempt < retries:
             time.sleep(1)
-    raise RuntimeError("Threads API temporarily unavailable") from last_error
+    status = last_error.code if isinstance(last_error, HTTPError) else None
+    suffix = f" (HTTP {status})" if status is not None else ""
+    raise RuntimeError(f"Threads API temporarily unavailable{suffix}") from last_error
 
 
 def fetch_json(url: str, timeout: int = 20, retries: int = 1) -> Any:
