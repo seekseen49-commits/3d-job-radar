@@ -77,6 +77,23 @@ class ThreadsSourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await process_external_sources([GoodProvider()], self.state, SETTINGS, self.send, now=NOW), 1)
         self.assertEqual(len(self.sent), 1)
 
+    async def test_one_failed_keyword_does_not_block_other_threads_keywords(self) -> None:
+        calls = 0
+
+        def fetcher(_url: str, _token: str):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise RuntimeError("HTTP 500")
+            return {"data": [post("after-error")]}
+
+        source = ThreadsSource("secret-value", fetcher=fetcher)
+        self.assertEqual(await process_threads_source(source, self.state, SETTINGS, self.send, now=NOW), 1)
+        self.assertEqual(calls, len(THREADS_KEYWORDS))
+        self.assertEqual(len(self.sent), 1)
+        self.assertTrue(self.state.is_processed(source._job(post("after-error"))))
+        self.assertFalse(self.state.is_initialized("Threads"))
+
     async def test_missing_token_skips_without_changing_state(self) -> None:
         source = ThreadsSource("", fetcher=lambda *_: self.fail("must not call API"))
         before = dict(self.state.values)

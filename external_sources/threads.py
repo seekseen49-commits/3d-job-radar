@@ -40,6 +40,7 @@ class ThreadsSource:
         self.access_token = access_token
         self.interval_minutes = interval_minutes
         self._fetcher = fetcher
+        self.had_query_error = False
 
     def request_url(self, query: str) -> str:
         params = {"q": query, "search_type": "RECENT", "fields": THREADS_FIELDS}
@@ -48,8 +49,14 @@ class ThreadsSource:
     def fetch_jobs(self) -> list[ExternalJob]:
         jobs: list[ExternalJob] = []
         seen_ids: set[str] = set()
+        self.had_query_error = False
         for query in THREADS_KEYWORDS:
-            payload = self._fetcher(self.request_url(query), self.access_token)
+            try:
+                payload = self._fetcher(self.request_url(query), self.access_token)
+            except Exception:
+                self.had_query_error = True
+                logging.warning("Threads keyword query failed; remaining queries continue")
+                continue
             rows = payload.get("data", []) if isinstance(payload, dict) else []
             for row in rows:
                 if not isinstance(row, dict) or row.get("id") is None:
@@ -105,7 +112,7 @@ async def process_threads_source(
         return 0
 
     sent = 0
-    completed = True
+    completed = not source.had_query_error
     for job in jobs:
         if state.is_processed(job):
             continue
