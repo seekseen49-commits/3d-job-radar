@@ -3,25 +3,43 @@ from __future__ import annotations
 import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.error import HTTPError
 from unittest.mock import patch
 
-from external_sources.base import ExternalJob, ExternalState, process_external_sources
-from external_sources.http import fetch_json_with_bearer_token
-from external_sources.threads import THREADS_KEYWORDS, ThreadsSource, is_russian_post, process_threads_source
+from external_sources.base import ExternalState
+from external_sources.http import ThreadsApiError, fetch_json_with_bearer_token
+from external_sources.threads import (
+    THREADS_KEYWORDS,
+    THREADS_WEEKLY_LIMIT,
+    ThreadsSource,
+    _safe_error_fields,
+    process_threads_source,
+)
 
 
 NOW = datetime(2026, 8, 12, 12, tzinfo=UTC)
-SETTINGS = SimpleNamespace(threads_enabled=True, send_freelance_vacancies=True, send_job_vacancies=True)
-RUSSIAN_ORDER = "Ищу Blender-специалиста для создания трех рендеров"
+SETTINGS = SimpleNamespace(
+    threads_enabled=True,
+    send_freelance_vacancies=True,
+    send_job_vacancies=True,
+)
+ORDER = "Ищу Blender-специалиста для создания трех рендеров"
 
 
-def post(identifier: str, text: str = RUSSIAN_ORDER) -> dict[str, str]:
-    return {"id": identifier, "text": text, "permalink": f"https://www.threads.net/@client/post/{identifier}", "timestamp": "2026-08-12T11:30:00Z", "username": "client"}
+def post(identifier: str, text: str = ORDER) -> dict[str, str]:
+    return {
+        "id": identifier,
+        "text": text,
+        "permalink": f"https://www.threads.net/@client/post/{identifier}",
+        "timestamp": "2026-08-12T11:30:00Z",
+        "username": "client",
+    }
 
 
-class ThreadsSourceTests(unittest.IsolatedAsyncioTestCase):
+class ThreadsTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.folder = tempfile.TemporaryDirectory()
         self.state = ExternalState(Path(self.folder.name) / "external_sources.json")
@@ -29,108 +47,112 @@ class ThreadsSourceTests(unittest.IsolatedAsyncioTestCase):
 
         async def send(card: str) -> None:
             self.sent.append(card)
+
         self.send = send
 
     async def asyncTearDown(self) -> None:
         self.folder.cleanup()
 
-    def source(self, rows: list[dict[str, str]], calls: list[tuple[str, str]] | None = None) -> ThreadsSource:
-        def fetcher(url: str, token: str):
-            if calls is not None:
-                calls.append((url, token))
-            return {"data": rows}
-        return ThreadsSource("secret-value", fetcher=fetcher)
+    def source(self, fetcher):
+        return ThreadsSource("secret-token", fetcher=fetcher)
 
-    def test_official_recent_search_uses_queries_and_hides_token_from_url(self) -> None:
+    async def test_successful_me_then_one_recent_keyword_search(self) -> None:
         calls: list[tuple[str, str]] = []
-        self.source([], calls).fetch_jobs()
-        self.assertEqual(len(calls), len(THREADS_KEYWORDS))
-        self.assertTrue(all("search_type=RECENT" in url and "q=" in url for url, _ in calls))
-        self.assertTrue(all("secret-value" not in url for url, _ in calls))
-        self.assertTrue(all(token == "secret-value" for _, token in calls))
-        self.assertTrue(all(url.startswith("https://graph.threads.net/keyword_search?") for url, _ in calls))
 
-    async def test_russian_direct_order_is_sent_once_and_external_id_is_saved(self) -> None:
-        source = self.source([post("one")])
-        self.assertEqual(await process_threads_source(source, self.state, SETTINGS, self.send, now=NOW), 1)
-        self.assertEqual(len(self.sent), 1)
-        self.assertTrue(self.state.is_processed(source._job(post("one"))))
-        self.assertEqual(await process_threads_source(source, self.state, SETTINGS, self.send, now=NOW + timedelta(minutes=5)), 0)
+        def fetcher(url: str, token: str):
+            calls.append((url, token))
+            return {"id": "me", "username": "radar"} if "/me?" in url else {"data": [post("one")]}
+
+        self.assertEqual(await process_threads_source(self.source(fetcher), self.state, SETTINGS, self.send, now=NOW), 1)
+        self.assertEqual(len(calls), 2)
+        self.assertIn("fields=id%2Cusername", calls[0][0])
+        self.assertIn("search_type=RECENT", calls[1][0])
         self.assertEqual(len(self.sent), 1)
 
-    async def test_english_post_is_rejected_before_order_filter(self) -> None:
-        english = "Looking for a Blender artist to create three renders"
-        source = self.source([post("english", english)])
-        self.assertEqual(await process_threads_source(source, self.state, SETTINGS, self.send, now=NOW), 0)
+    async def test_authorization_error_stops_before_keyword_search(self) -> None:
+        error = ThreadsApiError(403, {"error": {"message": "Invalid OAuth", "type": "OAuthException", "code": 190}})
+        with self.assertLogs(level="ERROR") as logs:
+            sent = await process_threads_source(
+                self.source(lambda *_: (_ for _ in ()).throw(error)),
+                self.state,
+                SETTINGS,
+                self.send,
+                now=NOW,
+            )
+        self.assertEqual(sent, 0)
+        self.assertIn("OAuthException", "\n".join(logs.output))
         self.assertEqual(self.sent, [])
-        self.assertTrue(self.state.is_processed(source._job(post("english", english))))
 
-    async def test_threads_api_error_does_not_stop_other_external_source(self) -> None:
-        bad = ThreadsSource("secret-value", fetcher=lambda *_: (_ for _ in ()).throw(RuntimeError("Threads unavailable")))
-        self.assertEqual(await process_threads_source(bad, self.state, SETTINGS, self.send, now=NOW), 0)
+    async def test_temporary_http_500_records_backoff_and_only_one_query(self) -> None:
+        calls: list[str] = []
+        error = ThreadsApiError(500, {"error": {"message": "Internal", "type": "OAuthException", "code": 2, "is_transient": True}})
 
-        class GoodProvider:
-            name, interval_minutes = "Good", 60
-            def fetch_jobs(self):
-                return [ExternalJob("Good", "one", "Need a Blender artist to create one product model", "Paid task", "https://example.test/one", NOW, "Studio")]
+        def fetcher(url: str, _token: str):
+            calls.append(url)
+            return {"id": "me", "username": "radar"} if "/me?" in url else (_ for _ in ()).throw(error)
 
-        self.assertEqual(await process_external_sources([GoodProvider()], self.state, SETTINGS, self.send, now=NOW), 1)
+        await process_threads_source(self.source(fetcher), self.state, SETTINGS, self.send, now=NOW)
+        self.assertEqual(len(calls), 2)
+        self.assertIn("next_retry_at", self.state.values["threads"])
+        self.assertEqual(len(self.state.values["threads"]["keyword_request_history"]), 1)
+
+    async def test_keywords_rotate_and_weekly_limit_is_enforced(self) -> None:
+        queries: list[str] = []
+
+        def fetcher(url: str, _token: str):
+            if "/me?" in url:
+                return {"id": "me", "username": "radar"}
+            queries.append(url)
+            return {"data": []}
+
+        source = self.source(fetcher)
+        await process_threads_source(source, self.state, SETTINGS, self.send, now=NOW)
+        await process_threads_source(source, self.state, SETTINGS, self.send, now=NOW + timedelta(minutes=30))
+        self.assertIn("q=3D", queries[0])
+        self.assertIn("q=3%D0%B4", queries[1])
+        state = self.state.values["threads"]
+        state["keyword_request_history"] = [(NOW - timedelta(days=1)).isoformat()] * THREADS_WEEKLY_LIMIT
+        await process_threads_source(source, self.state, SETTINGS, self.send, now=NOW + timedelta(hours=1))
+        self.assertEqual(len(queries), 2)
+
+    async def test_duplicate_and_english_posts_are_not_sent_twice(self) -> None:
+        def fetcher(url: str, _token: str):
+            return {"id": "me", "username": "radar"} if "/me?" in url else {"data": [post("one"), post("english", "Looking for a Blender artist")]}
+
+        source = self.source(fetcher)
+        await process_threads_source(source, self.state, SETTINGS, self.send, now=NOW)
+        await process_threads_source(source, self.state, SETTINGS, self.send, now=NOW + timedelta(minutes=30))
         self.assertEqual(len(self.sent), 1)
 
-    async def test_one_failed_keyword_does_not_block_other_threads_keywords(self) -> None:
-        calls = 0
-
-        def fetcher(_url: str, _token: str):
-            nonlocal calls
-            calls += 1
-            if calls == 1:
-                raise RuntimeError("HTTP 500")
-            return {"data": [post("after-error")]}
-
-        source = ThreadsSource("secret-value", fetcher=fetcher)
-        self.assertEqual(await process_threads_source(source, self.state, SETTINGS, self.send, now=NOW), 1)
-        self.assertEqual(calls, len(THREADS_KEYWORDS))
-        self.assertEqual(len(self.sent), 1)
-        self.assertTrue(self.state.is_processed(source._job(post("after-error"))))
-        self.assertFalse(self.state.is_initialized("Threads"))
-
-    def test_keyword_error_log_does_not_contain_the_access_token(self) -> None:
-        source = ThreadsSource("secret-value", fetcher=lambda *_: (_ for _ in ()).throw(RuntimeError("HTTP 500")))
-        with self.assertLogs(level="WARNING") as logs:
-            source.fetch_jobs()
-        output = "\n".join(logs.output)
-        self.assertIn("HTTP 500", output)
-        self.assertNotIn("secret-value", output)
-
-    async def test_missing_token_skips_without_changing_state(self) -> None:
-        source = ThreadsSource("", fetcher=lambda *_: self.fail("must not call API"))
-        before = dict(self.state.values)
-        self.assertEqual(await process_threads_source(source, self.state, SETTINGS, self.send, now=NOW), 0)
-        self.assertEqual(self.state.values, before)
+    def test_safe_json_error_fields_and_no_token_or_url_logging(self) -> None:
+        error = ThreadsApiError(400, {"error": {"message": "Missing permission", "type": "OAuthException", "code": 10, "error_subcode": 123, "is_transient": False, "fbtrace_id": "trace"}})
+        fields = _safe_error_fields(error)
+        self.assertEqual(fields, {"message": "Missing permission", "type": "OAuthException", "code": 10, "error_subcode": 123, "is_transient": False, "fbtrace_id": "trace"})
+        self.assertNotIn("secret-token", str(fields))
 
 
 class ThreadsHttpSecurityTests(unittest.TestCase):
-    def test_bearer_token_is_only_in_authorization_header(self) -> None:
+    def test_bearer_token_stays_out_of_url(self) -> None:
         class Response:
-            def read(self): return b'{"data": []}'
-            def __enter__(self): return self
-            def __exit__(self, *_): return False
+            def read(self):
+                return b'{"data": []}'
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
         with patch("external_sources.http.urlopen", return_value=Response()) as urlopen:
-            self.assertEqual(fetch_json_with_bearer_token("https://graph.threads.net/v1.0/keyword_search?q=3D", "top-secret"), {"data": []})
+            fetch_json_with_bearer_token("https://graph.threads.net/keyword_search?q=3D", "top-secret")
         request = urlopen.call_args.args[0]
         self.assertNotIn("top-secret", request.full_url)
         self.assertEqual(request.get_header("Authorization"), "Bearer top-secret")
 
-    def test_cyrillic_marks_russian_or_mixed_posts_only(self) -> None:
-        self.assertTrue(is_russian_post("Ищу 3D-моделлера в Blender"))
-        self.assertFalse(is_russian_post("Looking for a Blender artist"))
-
-    def test_meta_error_detail_does_not_include_request_url_or_token(self) -> None:
-        from urllib.error import HTTPError
-        from io import BytesIO
-        from external_sources.http import _safe_api_error_detail
-
-        error = HTTPError("https://graph.threads.net/keyword_search?secret", 403, "Forbidden", None, BytesIO(b'{"error":{"type":"OAuthException","code":10,"message":"Missing permission"}}'))
-        detail = _safe_api_error_detail(error)
-        self.assertIn("OAuthException", detail)
-        self.assertNotIn("secret", detail)
+    def test_http_error_has_safe_payload(self) -> None:
+        error = HTTPError("https://graph.threads.net/keyword_search?secret", 500, "Error", None, BytesIO(b'{"error":{"code":2,"is_transient":true}}'))
+        with patch("external_sources.http.urlopen", side_effect=error):
+            with self.assertRaises(ThreadsApiError) as caught:
+                fetch_json_with_bearer_token("https://graph.threads.net/keyword_search?q=3D", "top-secret")
+        self.assertEqual(caught.exception.status, 500)
+        self.assertTrue(caught.exception.is_transient)

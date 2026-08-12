@@ -11,6 +11,17 @@ from urllib.request import Request, urlopen
 USER_AGENT = "3D-Job-Radar/1.0 (+https://github.com/)"
 
 
+class ThreadsApiError(RuntimeError):
+    """Safe structured error from the official Threads API."""
+
+    def __init__(self, status: int, payload: Any) -> None:
+        self.status = status
+        self.payload = payload if isinstance(payload, dict) else {}
+        error = self.payload.get("error", self.payload)
+        self.is_transient = bool(isinstance(error, dict) and error.get("is_transient")) or status >= 500
+        super().__init__(f"Threads API HTTP {status}")
+
+
 def _safe_api_error_detail(error: HTTPError) -> str:
     """Return Meta's public error classification without URLs, headers, or secrets."""
     try:
@@ -24,10 +35,17 @@ def _safe_api_error_detail(error: HTTPError) -> str:
     return "; ".join(fields)[:500]
 
 
-def fetch_json_with_bearer_token(url: str, token: str, timeout: int = 20, retries: int = 1) -> Any:
+def _error_payload(error: HTTPError) -> dict[str, Any]:
+    try:
+        value = json.loads(error.read().decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def fetch_json_with_bearer_token(url: str, token: str, timeout: int = 20, retries: int = 0) -> Any:
     """Fetch JSON with an OAuth bearer token kept out of the URL and logs."""
     last_error: Exception | None = None
-    last_detail = ""
     for attempt in range(retries + 1):
         try:
             request = Request(
@@ -37,21 +55,13 @@ def fetch_json_with_bearer_token(url: str, token: str, timeout: int = 20, retrie
             with urlopen(request, timeout=timeout) as response:  # nosec B310: fixed official API URL
                 return json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
-            last_error = exc
-            detail = _safe_api_error_detail(exc)
-            last_detail = detail
-            if exc.code != 429 and not 500 <= exc.code < 600:
-                suffix = f": {detail}" if detail else ""
-                raise RuntimeError(f"Threads API request rejected (HTTP {exc.code}){suffix}") from exc
+            payload = _error_payload(exc)
+            raise ThreadsApiError(exc.code, payload) from exc
         except URLError as exc:
             last_error = exc
         if attempt < retries:
             time.sleep(1)
-    status = last_error.code if isinstance(last_error, HTTPError) else None
-    suffix = f" (HTTP {status})" if status is not None else ""
-    if last_detail:
-        suffix += f": {last_detail}"
-    raise RuntimeError(f"Threads API temporarily unavailable{suffix}") from last_error
+    raise RuntimeError("Threads API temporarily unavailable") from last_error
 
 
 def fetch_json(url: str, timeout: int = 20, retries: int = 1) -> Any:
