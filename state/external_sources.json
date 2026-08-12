@@ -280,13 +280,14 @@
     "Remotive:2091088": "2026-08-11T19:35:39.849074+00:00"
   },
   "threads": {
-    "consecutive_transient_errors": 1,
+    "consecutive_transient_errors": 2,
     "keyword_request_history": [
-      "2026-08-12T15:38:18.690325+00:00"
+      "2026-08-12T15:38:18.690325+00:00",
+      "2026-08-12T16:10:49.726929+00:00"
     ],
     "last_authorization_check_at": "2026-08-12T15:38:18.690325+00:00",
-    "last_keyword_attempt_at": "2026-08-12T15:38:18.690325+00:00",
-    "next_keyword_index": 1,
-    "next_retry_at": "2026-08-12T16:08:18.690325+00:00"
+    "last_keyword_attempt_at": "2026-08-12T16:10:49.726929+00:00",
+    "next_keyword_index": 2,
+    "next_retry_at": "2026-08-12T16:40:49.726929+00:00"
   }
 }
