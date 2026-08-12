@@ -36,6 +36,9 @@ class Settings:
     himalayas_diagnostic: bool
     himalayas_mcp_enabled: bool
     himalayas_mcp_poll_minutes: int
+    threads_enabled: bool
+    threads_poll_interval_minutes: int
+    threads_access_token: str | None
 
 
 def _required(name: str) -> str:
@@ -87,4 +90,7 @@ def load_settings() -> Settings:
         himalayas_diagnostic=_bool("HIMALAYAS_DIAGNOSTIC", False),
         himalayas_mcp_enabled=_bool("HIMALAYAS_MCP_ENABLED", False),
         himalayas_mcp_poll_minutes=_positive_int("HIMALAYAS_MCP_POLL_MINUTES", 10),
+        threads_enabled=_bool("THREADS_ENABLED", False),
+        threads_poll_interval_minutes=_positive_int("THREADS_POLL_INTERVAL_MINUTES", 5),
+        threads_access_token=os.getenv("THREADS_ACCESS_TOKEN", "").strip() or None,
     )

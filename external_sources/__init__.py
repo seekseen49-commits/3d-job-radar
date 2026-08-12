@@ -5,6 +5,7 @@ from .himalayas import HimalayasSource
 from .himalayas_mcp import HimalayasMcpSource
 from .jobicy import JobicySource
 from .remotive import RemotiveSource
+from .threads import ThreadsSource, process_threads_source
 
 __all__ = (
     "ExternalJob",
@@ -13,5 +14,7 @@ __all__ = (
     "HimalayasMcpSource",
     "JobicySource",
     "RemotiveSource",
+    "ThreadsSource",
+    "process_threads_source",
     "process_external_sources",
 )

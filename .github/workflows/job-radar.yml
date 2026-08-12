@@ -13,6 +13,8 @@ on:
         required: false
         default: false
         type: boolean
+  schedule:
+    - cron: "*/5 * * * *"
 
 permissions:
   contents: write
@@ -35,6 +37,9 @@ jobs:
       HIMALAYAS_RECOVERY_BACKFILL: ${{ inputs.himalayas_recovery_backfill || 'false' }}
       HIMALAYAS_DIAGNOSTIC: ${{ inputs.himalayas_diagnostic || 'false' }}
       HIMALAYAS_MCP_ENABLED: "false"
+      THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+      THREADS_ENABLED: "true"
+      THREADS_POLL_INTERVAL_MINUTES: "5"
       SEND_FREELANCE_VACANCIES: "true"
       SEND_JOB_VACANCIES: "true"
     steps:

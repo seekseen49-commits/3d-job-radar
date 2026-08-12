@@ -11,6 +11,28 @@ from urllib.request import Request, urlopen
 USER_AGENT = "3D-Job-Radar/1.0 (+https://github.com/)"
 
 
+def fetch_json_with_bearer_token(url: str, token: str, timeout: int = 20, retries: int = 1) -> Any:
+    """Fetch JSON with an OAuth bearer token kept out of the URL and logs."""
+    last_error: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            request = Request(
+                url,
+                headers={"Accept": "application/json", "User-Agent": USER_AGENT, "Authorization": f"Bearer {token}"},
+            )
+            with urlopen(request, timeout=timeout) as response:  # nosec B310: fixed official API URL
+                return json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            last_error = exc
+            if exc.code != 429 and not 500 <= exc.code < 600:
+                raise
+        except URLError as exc:
+            last_error = exc
+        if attempt < retries:
+            time.sleep(1)
+    raise RuntimeError("Threads API temporarily unavailable") from last_error
+
+
 def fetch_json(url: str, timeout: int = 20, retries: int = 1) -> Any:
     """Выполняет не более двух попыток при 429/5xx и не содержит секретов."""
     last_error: Exception | None = None

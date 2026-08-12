@@ -243,7 +243,10 @@ async def run_once() -> None:
     from aiogram import Bot
     from aiogram.client.default import DefaultBotProperties
     from aiogram.enums import ParseMode
-    from external_sources import ExternalState, HimalayasMcpSource, HimalayasSource, JobicySource, RemotiveSource, process_external_sources
+    from external_sources import (
+        ExternalState, HimalayasMcpSource, HimalayasSource, JobicySource, RemotiveSource,
+        ThreadsSource, process_external_sources, process_threads_source,
+    )
 
     bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     try:
@@ -251,11 +254,21 @@ async def run_once() -> None:
             if not await send_to_recipients(bot, settings.recipient_chat_ids, card):
                 raise RuntimeError("Уведомление не доставлено ни одному получателю")
 
+        state = ExternalState()
+        total = 0
+        if settings.threads_enabled:
+            try:
+                total += await process_threads_source(
+                    ThreadsSource(settings.threads_access_token or "", settings.threads_poll_interval_minutes),
+                    state, settings, send,
+                )
+            except Exception:
+                logging.exception("Threads source failed; other external sources continue")
         providers = select_external_providers(
             settings, HimalayasMcpSource, HimalayasSource, JobicySource, RemotiveSource,
         )
-        total = await process_external_sources(
-            providers, ExternalState(), settings, send,
+        total += await process_external_sources(
+            providers, state, settings, send,
             himalayas_recovery=settings.himalayas_recovery_backfill,
         )
         logging.info("Проверка внешних источников завершена: отправлено %s", total)
