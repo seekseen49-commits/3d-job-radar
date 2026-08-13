@@ -60,13 +60,21 @@ FOREIGN_BARRIER_PATTERNS = (
     r"\bforeign bank account\b",
     r"\b(?:paypal|wise|sepa)\s+only\b",
 )
-PROFILE_BARRIER_PATTERNS = (
-    r"\bткан\w*\b",
-    r"\bодежд\w*\b",
-    r"\bвышивк\w*\b",
-    r"\bсум(?:ка|ки|ок|ку|кой|ками)\b",
-    r"\b(?:fabric|garment|clothing|cloth simulation)\b",
-    r"\bmarvelous designer\b",
+PROFILE_BARRIERS = (
+    (r"\bткан\w*\b|\bодежд\w*\b|\bвышивк\w*\b|\bсум(?:ка|ки|ок|ку|кой|ками)\b|\b(?:fabric|garment|clothing|cloth simulation)\b|\bmarvelous designer\b", "ткань, одежда, вышивка или сумки"),
+    (r"\b(?:3d\s+)?character artist\b|\bcharacters?\b|\bcreatures?\b|\bперсонаж\w*\b|\bсуществ\w*\b", "персонажи или существа"),
+    (r"\b(?:environment|landscape|level) artist\b|\b(?:complete|full|large) (?:game )?(?:environment|location)\b|\b(?:полн\w*|цел\w*|больш\w*) (?:игров\w* )?локац\w*\b", "большое окружение или целая локация"),
+    (r"\b(?:develop|build|create) (?:an? )?3d game\b|\b(?:разработать|создать|сделать) 3[дd][- ]?игр\w*\b", "разработка игры целиком"),
+    (r"\bmotion designer\b|\bvfx\b|\bvideo animation\b|\bмоушн\w*\b|\bвидеоанимац\w*\b|\b(?:3[дd][- ]?)?ролик\w*\b", "motion, VFX или видеоролики"),
+    (r"\brigging\b|\bskin(?:ning)?\b|\bриггинг\w*\b|\bскиннинг\w*\b|\bсложн\w* анимац\w*\b", "риггинг, скиннинг или сложная анимация"),
+    (r"\bинженер[- ]конструктор\b|\bengineering degree\b|\b(?:fem|fea)\b|\bинженерн\w* расчет\w*\b|\bпрочностн\w* расчет\w*\b", "инженерное проектирование или расчёты"),
+    (r"\b(?:required|mandatory|must use|only)\b.{0,50}\b(?:maya|3ds max|corona|solidworks|fusion 360|компас)\b|\b(?:maya|3ds max|corona|solidworks|fusion 360|компас)\b.{0,50}\b(?:required|mandatory|обязател\w*|только)\b|\bобязател\w*\b.{0,50}\b(?:maya|3ds max|corona|solidworks|fusion 360|компас)\b", "обязательная программа вне Blender-пайплайна"),
+)
+PROFILE_FIT_GROUPS = (
+    ("игровые props / hard-surface", (r"\bprops?\b", r"\bhard[- ]surface\b", r"\bgame[- ]ready\b", r"\blow[- ]poly\b", r"\bигров\w* (?:предмет|объект|модел|ассет)\w*\b")),
+    ("STL / FDM / 3D-печать", (r"\bstl\b", r"\bfdm\b", r"3[дd][- ]?печат", r"\b3d[- ]?print")),
+    ("модель по фото, размерам или чертежу", (r"\bпо (?:фото|чертеж|размер)\w*\b",)),
+    ("Blender / FBX / GLB", (r"\bblender\b", r"\bблендер\b", r"\bfbx\b", r"\bglb\b", r"\bgltf\b")),
 )
 PAYMENT_CUES = (
     "оплата", "бюджет", "гонорар", "зарплата", "заработная плата", "ставка",
@@ -82,6 +90,23 @@ def _reject(result: FilterResult | None, reason: str, text: str) -> FilterResult
 
 def _matches_any(content: str, patterns: tuple[str, ...]) -> bool:
     return any(re.search(pattern, content, re.IGNORECASE | re.DOTALL) for pattern in patterns)
+
+
+def _profile_barrier(content: str) -> str | None:
+    for pattern, reason in PROFILE_BARRIERS:
+        if re.search(pattern, content, re.IGNORECASE | re.DOTALL):
+            return reason
+    return None
+
+
+def strict_fit_reasons(text: str) -> tuple[str, ...]:
+    """Короткие подтверждения соответствия портфолио для карточки."""
+    content = normalize(text)
+    return tuple(
+        label
+        for label, patterns in PROFILE_FIT_GROUPS
+        if any(re.search(pattern, content, re.IGNORECASE) for pattern in patterns)
+    )
 
 
 def _is_russian_language(text: str) -> bool:
@@ -140,8 +165,9 @@ def evaluate_strict(
         return _reject(None, "требуется обязательный английский", text)
     if _matches_any(content, FOREIGN_BARRIER_PATTERNS):
         return _reject(None, "нужна зарубежная география, карта или возможность выставлять invoice", text)
-    if _matches_any(content, PROFILE_BARRIER_PATTERNS):
-        return _reject(None, "вне рабочего профиля: ткань, одежда, вышивка или сумки", text)
+    profile_barrier = _profile_barrier(content)
+    if profile_barrier:
+        return _reject(None, f"вне рабочего профиля: {profile_barrier}", text)
 
     result = evaluate(text, mode, source_type)
     if not result.accepted:

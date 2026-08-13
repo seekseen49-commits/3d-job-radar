@@ -1,8 +1,6 @@
 name: 3D Job Radar
 
 on:
-  schedule:
-    - cron: "*/5 * * * *"
   workflow_dispatch:
     inputs:
       himalayas_recovery_backfill:
@@ -15,6 +13,8 @@ on:
         required: false
         default: false
         type: boolean
+  schedule:
+    - cron: "*/5 * * * *"
 
 permissions:
   contents: write
@@ -34,19 +34,14 @@ jobs:
       BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
       OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
       ADDITIONAL_RECIPIENT_CHAT_IDS: ${{ secrets.ADDITIONAL_RECIPIENT_CHAT_IDS }}
-      THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
-      FLRU_ENABLED: "true"
-      FLRU_POLL_INTERVAL_MINUTES: "15"
-      THREADS_ENABLED: "false"
-      THREADS_POLL_INTERVAL_MINUTES: "5"
-      HIMALAYAS_ENABLED: "false"
-      JOBICY_ENABLED: "false"
-      REMOTIVE_ENABLED: "false"
       HIMALAYAS_RECOVERY_BACKFILL: ${{ inputs.himalayas_recovery_backfill || 'false' }}
       HIMALAYAS_DIAGNOSTIC: ${{ inputs.himalayas_diagnostic || 'false' }}
       HIMALAYAS_MCP_ENABLED: "false"
+      THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+      THREADS_ENABLED: "true"
+      THREADS_POLL_INTERVAL_MINUTES: "30"
       SEND_FREELANCE_VACANCIES: "true"
-      SEND_JOB_VACANCIES: "false"
+      SEND_JOB_VACANCIES: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

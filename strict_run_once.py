@@ -21,7 +21,7 @@ from application_method import detect_application, format_application_block
 from config import Settings, load_settings
 from filters import FilterResult
 from recipients import send_to_recipients
-from strict_filters import evaluate_strict
+from strict_filters import evaluate_strict, strict_fit_reasons
 from telegram_runtime import session_for_settings
 
 
@@ -146,7 +146,8 @@ def format_strict_card(source: StrictSource, message: Any, result: FilterResult)
         "freelance_vacancy": "СТРОГАЯ ПРОЕКТНАЯ ВАКАНСИЯ",
         "job_vacancy": "СТРОГАЯ 3D-ВАКАНСИЯ",
     }[result.category]
-    fit = ", ".join(result.profile_reasons) if result.profile_reasons else "прошло все профильные ограничения"
+    fit_reasons = strict_fit_reasons(text)
+    fit = ", ".join(fit_reasons) if fit_reasons else "прошло все профильные ограничения"
     application = detect_application(text, "Telegram", link)
     preview = text[:900].rstrip() + ("…" if len(text) > 900 else "")
     blocks = [
