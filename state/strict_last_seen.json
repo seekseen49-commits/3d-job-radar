@@ -1,10 +1,12 @@
 {
   "accepted": 0,
-  "checked": 0,
+  "checked": 1,
   "last_seen": {
     "artisthh": 1200,
     "cg_worker": 864,
-    "cgfreelance": 20044
+    "cgfreelance": 20045
   },
-  "rejected_by_reason": {}
+  "rejected_by_reason": {
+    "доминирующая самопрезентация (1): портфолио": 1
+  }
 }
