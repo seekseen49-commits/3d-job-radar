@@ -1,12 +1,13 @@
 {
   "accepted": 0,
-  "checked": 1,
+  "checked": 2,
   "last_seen": {
     "artisthh": 1200,
     "cg_worker": 864,
-    "cgfreelance": 20045
+    "cgfreelance": 20046
   },
   "rejected_by_reason": {
+    "вне рабочего профиля: motion, VFX или видеоролики": 1,
     "доминирующая самопрезентация (1): портфолио": 1
   }
 }
