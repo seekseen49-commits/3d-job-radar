@@ -1,6 +1,10 @@
 {
   "accepted": 0,
   "checked": 0,
-  "last_seen": {},
+  "last_seen": {
+    "artisthh": 1200,
+    "cg_worker": 864,
+    "cgfreelance": 20044
+  },
   "rejected_by_reason": {}
 }
