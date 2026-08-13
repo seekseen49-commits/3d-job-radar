@@ -1,0 +1,26 @@
+[
+  {
+    "channel": "cgfreelance",
+    "name": "CG Freelance",
+    "username": "cgfreelance",
+    "mode": "general",
+    "source_type": "mixed",
+    "enabled": true
+  },
+  {
+    "channel": "cg_worker",
+    "name": "CG Worker",
+    "username": "cg_worker",
+    "mode": "general",
+    "source_type": "mixed",
+    "enabled": true
+  },
+  {
+    "channel": "artisthh",
+    "name": "Вакансии 2D/3D Художники",
+    "username": "artisthh",
+    "mode": "general",
+    "source_type": "job_board",
+    "enabled": true
+  }
+]
