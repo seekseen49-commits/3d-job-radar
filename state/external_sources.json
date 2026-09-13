@@ -103,7 +103,7 @@
     "e4ae7684fbca2d65ce2f3b8684220a2f542526681d68644cfe08ac9e583d0784": "2026-08-30T20:35:40.181186+00:00",
     "e73656b3953bf667cfbb18828676fbefedd5c53b747dc9e1fa4f98c0268c9d55": "2026-08-16T19:55:36.625654+00:00",
     "ec0d260d1c18e63d956eb654aac864ccf41165b5dba4cdab9b5278cf39c553b1": "2026-08-24T20:20:48.891977+00:00",
-    "ecf44288dcf1a2e17278312ff30991ec6174f28fd15441af22e75b240dd98608": "2026-09-10T23:06:05.711647+00:00",
+    "ecf44288dcf1a2e17278312ff30991ec6174f28fd15441af22e75b240dd98608": "2026-09-13T00:54:01.998477+00:00",
     "f289ad7e39951c3fb34e48f898c5dc49e8a5fe1a4d2041eacda61512ef4b153a": "2026-09-06T20:56:13.321491+00:00",
     "f34f0dcf293009f79d1a1e02651419031e220605bda0444662800da6b1e6ad38": "2026-08-23T20:20:41.006082+00:00",
     "f9b304ff1a86cb43c1e246dcae5689c91cc8dd59f7bf933127d3be31ebc1c9b2": "2026-09-08T21:01:07.224272+00:00",
@@ -123,8 +123,8 @@
     "Threads": true
   },
   "last_poll_at": {
-    "Himalayas": "2026-09-11T23:17:18.699735+00:00",
-    "Jobicy": "2026-09-12T23:00:11.553030+00:00",
+    "Himalayas": "2026-09-13T00:54:01.998477+00:00",
+    "Jobicy": "2026-09-13T00:54:05.928564+00:00",
     "Remotive": "2026-09-12T21:01:28.047737+00:00",
     "Threads": "2026-08-13T14:01:09.765918+00:00"
   },
@@ -221,6 +221,7 @@
     "Himalayas:https://himalayas.app/companies/fitxr/jobs/character-animator-2-month-contract": "2026-08-25T20:25:40.157983+00:00",
     "Himalayas:https://himalayas.app/companies/fluency-inc-a92b5614-7a5c-4a66-8e47-cfdd3f504a59/jobs/manager-product-design": "2026-08-28T20:30:58.974541+00:00",
     "Himalayas:https://himalayas.app/companies/forgotten-empires/jobs/technical-designer-talent-pipeline": "2026-09-10T23:06:05.711647+00:00",
+    "Himalayas:https://himalayas.app/companies/forgotten-empires/jobs/technical-designer-talent-pipeline-1463551955": "2026-09-13T00:54:01.998477+00:00",
     "Himalayas:https://himalayas.app/companies/framestore/jobs/animator-8187586598": "2026-08-15T19:55:35.495051+00:00",
     "Himalayas:https://himalayas.app/companies/framestore/jobs/creature-fx-td-freelancer": "2026-08-21T20:10:45.695463+00:00",
     "Himalayas:https://himalayas.app/companies/fs-studio/jobs/houdini-artist-6927080912": "2026-08-22T20:15:48.613621+00:00",
@@ -727,7 +728,6 @@
     "Jobicy:147118": "2026-08-20T06:55:41.721077+00:00",
     "Jobicy:147119": "2026-08-20T06:55:41.721077+00:00",
     "Jobicy:147122": "2026-08-20T06:55:41.721077+00:00",
-    "Jobicy:147123": "2026-08-13T23:05:46.453975+00:00",
     "Jobicy:147131": "2026-09-07T11:20:39.674634+00:00",
     "Jobicy:147134": "2026-08-20T06:55:41.721077+00:00",
     "Jobicy:147135": "2026-08-21T07:50:46.876520+00:00",
@@ -1265,7 +1265,6 @@
     "Jobicy:150373": "2026-09-10T23:06:18.117263+00:00",
     "Jobicy:150376": "2026-09-10T09:05:37.767667+00:00",
     "Jobicy:150379": "2026-09-10T23:06:18.117263+00:00",
-    "Jobicy:150380": "2026-08-13T23:05:46.453975+00:00",
     "Jobicy:150381": "2026-09-10T09:05:37.767667+00:00",
     "Jobicy:150382": "2026-09-10T23:06:18.117263+00:00",
     "Jobicy:150385": "2026-09-10T23:06:18.117263+00:00",
