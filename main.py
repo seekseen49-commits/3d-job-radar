@@ -21,6 +21,7 @@ from database import Database
 from filters import FilterResult, evaluate
 from telegram_runtime import connect_with_retry, run_channel_handler, session_for_settings, shutdown_resources
 from recipients import send_to_recipients
+from threads_comment_assistant import ThreadsCommentAssistant, register_threads_comment_handlers
 
 
 @dataclass(frozen=True)
@@ -161,6 +162,13 @@ async def run(stop_event: asyncio.Event | None = None) -> None:
     sources = load_sources(settings.sources_path)
     bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = build_dispatcher(settings, db, settings.sources_path)
+    threads_comment_assistant: ThreadsCommentAssistant | None = None
+    if settings.threads_comments_enabled:
+        if not settings.threads_access_token:
+            logging.warning("THREADS_COMMENTS_ENABLED=true, но THREADS_ACCESS_TOKEN не задан")
+        else:
+            threads_comment_assistant = ThreadsCommentAssistant(settings, db, bot)
+            register_threads_comment_handlers(dp, threads_comment_assistant, settings)
     client = TelegramClient(session_for_settings(settings), settings.api_id, settings.api_hash)
     stop_event = stop_event or asyncio.Event()
     install_shutdown_handlers(stop_event)
@@ -201,6 +209,8 @@ async def run(stop_event: asyncio.Event | None = None) -> None:
             asyncio.create_task(client.run_until_disconnected()),
             asyncio.create_task(stop_event.wait()),
         ]
+        if threads_comment_assistant is not None:
+            tasks.append(asyncio.create_task(threads_comment_assistant.run(stop_event)))
         done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in done:
             if task is not tasks[2] and not task.cancelled() and task.exception():

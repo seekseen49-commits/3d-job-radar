@@ -39,6 +39,12 @@ class Settings:
     threads_enabled: bool
     threads_poll_interval_minutes: int
     threads_access_token: str | None
+    threads_comments_enabled: bool
+    threads_comment_queries: tuple[str, ...]
+    threads_comment_scan_minutes: int
+    threads_comment_own_username: str | None
+    ollama_base_url: str
+    ollama_model: str
 
 
 def _required(name: str) -> str:
@@ -58,6 +64,12 @@ def _positive_int(name: str, default: int) -> int:
     except ValueError:
         return default
     return value if value > 0 else default
+
+
+def _csv(name: str, default: str) -> tuple[str, ...]:
+    raw = os.getenv(name, default)
+    values = tuple(part.strip() for part in raw.split(",") if part.strip())
+    return values or tuple(part.strip() for part in default.split(",") if part.strip())
 
 
 def load_settings() -> Settings:
@@ -93,4 +105,13 @@ def load_settings() -> Settings:
         threads_enabled=_bool("THREADS_ENABLED", False),
         threads_poll_interval_minutes=_positive_int("THREADS_POLL_INTERVAL_MINUTES", 30),
         threads_access_token=os.getenv("THREADS_ACCESS_TOKEN", "").strip() or None,
+        threads_comments_enabled=_bool("THREADS_COMMENTS_ENABLED", False),
+        threads_comment_queries=_csv(
+            "THREADS_COMMENT_QUERIES",
+            "Blender,3D,3д,game dev,Unreal Engine,3D printing,motion design,After Effects",
+        ),
+        threads_comment_scan_minutes=max(_positive_int("THREADS_COMMENT_SCAN_MINUTES", 30), 15),
+        threads_comment_own_username=os.getenv("THREADS_COMMENT_OWN_USERNAME", "").strip().lstrip("@") or None,
+        ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").strip().rstrip("/"),
+        ollama_model=os.getenv("OLLAMA_MODEL", "qwen3:4b").strip() or "qwen3:4b",
     )
