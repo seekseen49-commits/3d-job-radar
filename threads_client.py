@@ -1,13 +1,14 @@
 """Асинхронный клиент официального Threads API."""
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
 
-API_BASE = "https://graph.threads.net/v1.0"
+API_BASE = "https://graph.threads.net"
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,11 @@ class ThreadPost:
 class ThreadsApiError(RuntimeError):
     """Понятная ошибка официального Threads API."""
 
+    def __init__(self, message: str, *, status: int | None = None, payload: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+        self.payload = payload or {}
+
 
 class ThreadsClient:
     def __init__(self, access_token: str, *, timeout: float = 25.0) -> None:
@@ -32,39 +38,46 @@ class ThreadsClient:
         self.timeout = timeout
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
-        params = dict(kwargs.pop("params", {}) or {})
-        params["access_token"] = self.access_token
+        headers = dict(kwargs.pop("headers", {}) or {})
+        headers["Authorization"] = f"Bearer {self.access_token}"
         async with httpx.AsyncClient(base_url=API_BASE, timeout=self.timeout) as client:
-            response = await client.request(method, path, params=params, **kwargs)
+            response = await client.request(method, path, headers=headers, **kwargs)
 
         try:
             payload = response.json()
         except ValueError as exc:
             raise ThreadsApiError(
-                f"Threads API returned non-JSON response ({response.status_code})"
+                f"Threads API returned non-JSON response ({response.status_code})",
+                status=response.status_code,
             ) from exc
 
         if response.is_error:
             message = payload.get("error", {}).get("message") if isinstance(payload, dict) else None
-            raise ThreadsApiError(message or f"Threads API error {response.status_code}")
+            raise ThreadsApiError(
+                message or f"Threads API error {response.status_code}",
+                status=response.status_code,
+                payload=payload if isinstance(payload, dict) else {},
+            )
         if not isinstance(payload, dict):
-            raise ThreadsApiError("Unexpected Threads API response")
+            raise ThreadsApiError("Unexpected Threads API response", status=response.status_code)
         return payload
 
+    async def me(self) -> dict[str, Any]:
+        return await self._request("GET", "/v1.0/me", params={"fields": "id,username"})
+
     async def search_recent(self, query: str, *, limit: int = 20) -> list[ThreadPost]:
+        # Keyword Search в Threads использует отдельный endpoint без /v1.0.
         payload = await self._request(
             "GET",
             "/keyword_search",
             params={
                 "q": query,
                 "search_type": "RECENT",
-                "search_mode": "KEYWORD",
-                "limit": max(1, min(limit, 50)),
-                "fields": "id,text,username,permalink,timestamp,is_reply",
+                "fields": "id,text,username,permalink,timestamp",
             },
         )
         posts: list[ThreadPost] = []
-        for item in payload.get("data", []):
+        for item in payload.get("data", [])[: max(1, min(limit, 50))]:
             if not isinstance(item, dict):
                 continue
             post_id = str(item.get("id") or "").strip()
@@ -85,7 +98,7 @@ class ThreadsClient:
     async def create_text_reply(self, post_id: str, text: str) -> str:
         payload = await self._request(
             "POST",
-            "/me/threads",
+            "/v1.0/me/threads",
             params={
                 "media_type": "TEXT",
                 "text": text,
@@ -100,7 +113,7 @@ class ThreadsClient:
     async def publish_container(self, container_id: str) -> str:
         payload = await self._request(
             "POST",
-            "/me/threads_publish",
+            "/v1.0/me/threads_publish",
             params={"creation_id": container_id},
         )
         reply_id = str(payload.get("id") or "").strip()
@@ -110,11 +123,15 @@ class ThreadsClient:
 
     async def reply(self, post_id: str, text: str) -> str:
         container_id = await self.create_text_reply(post_id, text)
-        return await self.publish_container(container_id)
-
-    async def publishing_quota(self) -> dict[str, Any]:
-        return await self._request(
-            "GET",
-            "/me/threads_publishing_limit",
-            params={"fields": "quota_usage,config,reply_quota_usage,reply_config"},
-        )
+        last_error: Exception | None = None
+        # Текстовый контейнер обычно готов сразу, но API иногда отвечает раньше,
+        # чем контейнер становится публикуемым.
+        for delay in (0.0, 1.0, 2.0):
+            if delay:
+                await asyncio.sleep(delay)
+            try:
+                return await self.publish_container(container_id)
+            except ThreadsApiError as exc:
+                last_error = exc
+        assert last_error is not None
+        raise last_error
