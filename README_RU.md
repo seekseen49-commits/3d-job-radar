@@ -307,3 +307,33 @@ python -m pip install -r requirements.txt
 - `/threads_resume` — возобновить поиск.
 
 Черновики и статусы сохраняются в той же SQLite-базе, поэтому после перезапуска бот не забывает уже обработанные посты.
+
+
+### Если Ollama стоит на домашнем Windows, а Job Radar работает в GitHub Actions
+
+GitHub Actions не видит `127.0.0.1` вашего компьютера. Поэтому основной поиск заказов можно оставить в GitHub Actions, а только комментатор Threads запускать локально:
+
+```powershell
+python threads_comments_local.py
+```
+
+Он использует тот же Telegram-бот, тот же `.env`, Threads API и локальную Ollama. GitHub Actions продолжает искать заказы отдельно.
+
+Перед запуском проверьте:
+
+```powershell
+ollama list
+curl.exe http://127.0.0.1:11434/api/tags
+```
+
+Если модель `qwen3:4b` видна, добавьте в локальный `.env`:
+
+```env
+THREADS_COMMENTS_ENABLED=true
+THREADS_COMMENT_SCAN_MINUTES=30
+THREADS_COMMENT_OWN_USERNAME=ваш_threads_username
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=qwen3:4b
+```
+
+После запуска можно сразу отправить боту `/threads_scan`, чтобы не ждать следующего интервала.
