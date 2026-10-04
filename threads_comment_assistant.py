@@ -277,6 +277,67 @@ class ThreadsCommentAssistant:
             logging.info("Threads comments: draft created for post=%s", post.id)
             return 1
 
+    async def diagnostics(self) -> str:
+        """Безопасная проверка Threads API и локальных Ollama-моделей."""
+        lines = ["<b>Threads-комментатор: проверка</b>"]
+
+        try:
+            me = await self.client.me()
+            username = str(me.get("username") or "").strip()
+            suffix = f" (@{escape(username)})" if username else ""
+            lines.append(f"✅ Threads API: подключен{suffix}")
+        except Exception as exc:
+            lines.append(f"❌ Threads API: {escape(str(exc))}")
+
+        try:
+            await self.client.search_recent("Blender", limit=1)
+            lines.append("✅ Keyword Search: endpoint доступен")
+        except Exception as exc:
+            lines.append(f"❌ Keyword Search: {escape(str(exc))}")
+
+        try:
+            await self.client.get_my_replies(limit=1)
+            lines.append("✅ Чтение replies: доступно")
+        except Exception as exc:
+            lines.append(f"❌ Чтение replies: {escape(str(exc))}")
+
+        try:
+            models = await self.generator.available_models()
+
+            def has_model(required: str) -> bool:
+                if required in models:
+                    return True
+                base = required.split(":", 1)[0]
+                return any(name.split(":", 1)[0] == base for name in models)
+
+            if has_model(self.generator.model):
+                lines.append(f"✅ Ollama text: {escape(self.generator.model)}")
+            else:
+                lines.append(f"❌ Ollama text: нет {escape(self.generator.model)}")
+
+            if self.generator.vision_model:
+                if has_model(self.generator.vision_model):
+                    lines.append(f"✅ Ollama vision: {escape(self.generator.vision_model)}")
+                else:
+                    lines.append(f"❌ Ollama vision: нет {escape(self.generator.vision_model)}")
+            else:
+                lines.append("⚪ Ollama vision: выключена")
+        except Exception as exc:
+            lines.append(f"❌ Ollama: {escape(str(exc))}")
+
+        lines.append(
+            "\nНужные scopes токена: "
+            "<code>threads_basic</code>, "
+            "<code>threads_keyword_search</code>, "
+            "<code>threads_read_replies</code>, "
+            "<code>threads_content_publish</code>, "
+            "<code>threads_manage_replies</code>."
+        )
+        lines.append(
+            "Публикацию специально не тестирую автоматически, чтобы проверка ничего не написала в Threads."
+        )
+        return "\n".join(lines)
+
     async def publish(self, post_id: str) -> str:
         row = self.db.get_threads_comment_post(post_id)
         if row is None:
@@ -347,6 +408,14 @@ def register_threads_comment_handlers(
             f"Ошибки: {stats['failed']}\n"
             f"Проверка каждые {settings.threads_comment_scan_minutes} мин."
         )
+
+    @dp.message(Command("threads_check"))
+    async def threads_check(message: Message) -> None:
+        if not owner_message(message):
+            return
+        await message.answer("Проверяю Threads API, replies и Ollama…")
+        result = await assistant.diagnostics()
+        await message.answer(result)
 
     @dp.message(Command("threads_scan"))
     async def threads_scan(message: Message) -> None:
