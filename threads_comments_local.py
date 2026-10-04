@@ -159,6 +159,7 @@ async def run() -> None:
             if not task.done():
                 task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        await assistant.close()
         await bot.session.close()
         db.close()
 
