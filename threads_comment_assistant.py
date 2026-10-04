@@ -99,7 +99,8 @@ class ThreadsCommentAssistant:
         self.browser_client = (
             ThreadsBrowserClient(
                 getattr(settings, "threads_browser_profile_dir"),
-                headless=bool(getattr(settings, "threads_browser_headless", True)),
+                headless=bool(getattr(settings, "threads_browser_headless", False)),
+                channel=str(getattr(settings, "threads_browser_channel", "msedge")),
             )
             if self.discovery_mode == "browser"
             else None
