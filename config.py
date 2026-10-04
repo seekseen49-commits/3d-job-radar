@@ -108,7 +108,7 @@ def load_settings() -> Settings:
         threads_comments_enabled=_bool("THREADS_COMMENTS_ENABLED", False),
         threads_comment_queries=_csv(
             "THREADS_COMMENT_QUERIES",
-            "Blender,3D,3д,game dev,Unreal Engine,3D printing,motion design,After Effects",
+            "фриланс,заказчик,клиент,монтаж,видеомонтаж,Blender,3D,3д,game dev,Unreal Engine,motion design,After Effects,портфолио,3D printing,нейросети,AI,freelance,video editing,client work,creative work",
         ),
         threads_comment_scan_minutes=max(_positive_int("THREADS_COMMENT_SCAN_MINUTES", 30), 15),
         threads_comment_own_username=os.getenv("THREADS_COMMENT_OWN_USERNAME", "").strip().lstrip("@") or None,

@@ -101,7 +101,20 @@ class ThreadsCommentAssistant:
                 logging.info("Threads comments: no new candidates for query=%r", query)
                 return 0
 
-            post = candidates[0]
+            post: ThreadPost | None = None
+            for candidate in candidates[:6]:
+                try:
+                    if await self.generator.is_relevant(candidate.text):
+                        post = candidate
+                        break
+                except Exception:
+                    logging.exception("Threads comments: relevance check failed for post=%s", candidate.id)
+                    continue
+
+            if post is None:
+                logging.info("Threads comments: Ollama rejected all candidates for query=%r", query)
+                return 0
+
             draft = await self.generator.generate(post.text)
             self.db.save_threads_comment_draft(
                 post.id,

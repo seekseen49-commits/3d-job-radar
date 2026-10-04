@@ -8,7 +8,7 @@ from threads_client import ThreadPost
 
 URL_RE = re.compile(r"https?://", re.I)
 PROMO_RE = re.compile(
-    r"\b(hiring|hire me|dm me|commission|sale|discount|курс|обучение|ваканси|ищу сотрудник|набор на курс)\b",
+    r"\b(hiring|hire me|dm me|commission|sale|discount|ваканси|ищу сотрудник|набор на курс|купи курс|скидка на курс)\b",
     re.I,
 )
 RISK_RE = re.compile(
