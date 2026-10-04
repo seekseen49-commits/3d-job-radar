@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
+from datetime import datetime, timezone
 from html import escape
 from typing import Any
 
@@ -61,12 +63,21 @@ class ThreadsCommentAssistant:
         return queries[index]
 
     @staticmethod
-    def _candidate_score(post: ThreadPost) -> tuple[int, int]:
-        # Небольшие содержательные посты удобнее для человеческого комментария,
-        # чем одно слово или огромная простыня.
+    def _candidate_score(post: ThreadPost) -> tuple[int, int, int, int]:
         length = len(post.text)
-        preferred = 1 if 70 <= length <= 900 else 0
-        return preferred, -abs(length - 300)
+        preferred_length = 1 if 70 <= length <= 900 else 0
+        cyrillic = 1 if re.search(r"[А-Яа-яЁё]", post.text) else 0
+        freshness = 0
+        if post.timestamp:
+            try:
+                published = datetime.fromisoformat(post.timestamp.replace("Z", "+00:00"))
+                if published.tzinfo is None:
+                    published = published.replace(tzinfo=timezone.utc)
+                age_hours = (datetime.now(timezone.utc) - published.astimezone(timezone.utc)).total_seconds() / 3600
+                freshness = max(0, int(10 - age_hours))
+            except ValueError:
+                freshness = 0
+        return cyrillic, freshness, preferred_length, -abs(length - 300)
 
     def format_card(self, row: Any, *, note: str | None = None) -> str:
         username = str(row["username"] or "unknown")
@@ -88,14 +99,38 @@ class ThreadsCommentAssistant:
             return 0
 
         async with self._scan_lock:
-            queries_to_try = min(6, len(self.settings.threads_comment_queries))
-            pool: dict[str, ThreadPost] = {}
+            priority = (
+                "3D",
+                "Blender",
+                "фриланс",
+                "клиент",
+                "заказчик",
+                "монтаж",
+                "After Effects",
+                "Unreal Engine",
+            )
+            configured = list(self.settings.threads_comment_queries)
+            queries: list[str] = []
+            for query in (*priority, *configured):
+                if query not in queries:
+                    queries.append(query)
+                if len(queries) >= 10:
+                    break
 
-            for _ in range(queries_to_try):
-                query = self._next_query()
-                logging.info("Threads comments: search query=%r", query)
-                posts = await self.client.search_recent(query, limit=30)
-                for post in posts:
+            logging.info("Threads comments: scanning queries=%r", queries)
+            results = await asyncio.gather(
+                *(self.client.search_recent(query, limit=30) for query in queries),
+                return_exceptions=True,
+            )
+
+            pool: dict[str, ThreadPost] = {}
+            total_returned = 0
+            for query, result in zip(queries, results):
+                if isinstance(result, Exception):
+                    logging.warning("Threads comments: query=%r failed: %s", query, result)
+                    continue
+                total_returned += len(result)
+                for post in result:
                     if self.db.has_threads_comment_post(post.id):
                         continue
                     if not eligible_post(
@@ -106,11 +141,14 @@ class ThreadsCommentAssistant:
                         continue
                     pool[post.id] = post
 
+            logging.info(
+                "Threads comments: API returned=%s, fresh eligible unique=%s",
+                total_returned,
+                len(pool),
+            )
+
             if not pool:
-                logging.info(
-                    "Threads comments: no fresh candidates after %s queries",
-                    queries_to_try,
-                )
+                logging.info("Threads comments: no fresh eligible candidates in priority scan")
                 return 0
 
             candidates = sorted(pool.values(), key=self._candidate_score, reverse=True)[:12]
