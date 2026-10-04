@@ -32,6 +32,25 @@ CORE_DISCOVERY_QUERIES = (
     "нейросети дизайнер",
 )
 
+BROWSER_DISCOVERY_QUERIES = (
+    "3д моделирование",
+    "Blender",
+    "3D artist",
+    "рендер",
+    "визуализация 3д",
+    "видеомонтаж",
+    "монтажер",
+    "motion design",
+    "After Effects",
+    "Unreal Engine",
+    "gamedev artist",
+    "фриланс дизайнер",
+    "портфолио дизайнер",
+    "нейросети дизайнер",
+    "Canva дизайнер",
+    "3D printing",
+)
+
 EXPANDED_DISCOVERY_QUERIES = (
     # 3D / CG
     "blender3d", "blenderrender", "blenderart", "3dart", "3dartist",
@@ -188,16 +207,16 @@ class ThreadsCommentAssistant:
                     break
 
             if self.discovery_mode == "browser":
-                # Браузерный поиск заметно дороже API. Берём 4 запроса за проход
-                # и ротируем их, чтобы /threads_scan отвечал быстро, но темы со
-                # временем всё равно покрывались широко.
+                # В браузерном режиме вообще не используем широкие "клиент/работа/заказ".
+                # Только запросы, которые уже сами указывают на нужную профессию/сферу.
+                browser_queries = list(BROWSER_DISCOVERY_QUERIES)
                 browser_index = int(self.db.get_value("threads_browser_query_index", "0") or "0")
-                browser_index %= max(1, len(queries))
-                rotated_queries = queries[browser_index:] + queries[:browser_index]
+                browser_index %= len(browser_queries)
+                rotated_queries = browser_queries[browser_index:] + browser_queries[:browser_index]
                 queries = rotated_queries[:4]
                 self.db.set_value(
                     "threads_browser_query_index",
-                    str((browser_index + 4) % max(1, len(queries) if len(queries) < 4 else 40)),
+                    str((browser_index + 4) % len(browser_queries)),
                 )
 
             logging.info("Threads comments: scanning mode=%s queries=%r", self.discovery_mode, queries)
