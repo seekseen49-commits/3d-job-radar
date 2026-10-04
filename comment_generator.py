@@ -107,6 +107,14 @@ class CommentGenerationError(RuntimeError):
     pass
 
 
+META_OUTPUT_RE = re.compile(
+    r"(мне нужно|нужно написать|сначала|исходн(?:ый|ого) пост|пользователь|"
+    r"комментарий должен|задача|инструкц|проанализ|вариант комментария|"
+    r"хорошо,?\s*(?:мне|нужно)|i need to|first,? i|the user|analysis)",
+    re.I,
+)
+
+
 class OllamaCommentGenerator:
     def __init__(
         self,
@@ -139,7 +147,7 @@ class OllamaCommentGenerator:
             raise CommentGenerationError(f"Ollama returned HTTP {response.status_code}")
         payload = response.json()
         text = str(payload.get("message", {}).get("content") or "").strip()
-        text = text.strip('"').strip()
+        text = self._clean_model_output(text)
         if not text:
             raise CommentGenerationError("Ollama returned an empty comment")
         return text
@@ -224,6 +232,21 @@ class OllamaCommentGenerator:
         return names
 
     @staticmethod
+    def _clean_model_output(text: str) -> str:
+        # Некоторые Qwen-сборки иногда возвращают рассуждение даже при think=false.
+        # Убираем явные think-блоки и технические префиксы.
+        text = re.sub(r"<think>.*?</think>", "", text, flags=re.I | re.S).strip()
+        text = re.sub(r"^\s*(?:final|ответ|комментарий)\s*:\s*", "", text, flags=re.I)
+        return text.strip().strip('"').strip()
+
+    @staticmethod
+    def _looks_like_meta_output(text: str) -> bool:
+        compact = " ".join(text.split())
+        if not compact:
+            return True
+        return bool(META_OUTPUT_RE.search(compact[:500]))
+
+    @staticmethod
     def _trim(text: str) -> str:
         text = " ".join(line.strip() for line in text.splitlines() if line.strip())
         if len(text) > 360:
@@ -273,19 +296,48 @@ class OllamaCommentGenerator:
                 "(не пересказывай его и не отвечай напрямую комментаторам):\n"
                 f"{extra_context.strip()}"
             )
+        user_prompt = (
+            f"/no_think\n"
+            f"Напиши один качественный комментарий в Threads на {language} языке. "
+            "Верни ТОЛЬКО готовый комментарий. Не объясняй, как ты его пишешь, "
+            "не анализируй пост и не используй фразы вроде «мне нужно», «сначала», "
+            "«исходный пост» или «комментарий должен».\n\n"
+            f"Исходный пост:\n{post_text.strip()}{context}"
+        )
         draft = await self._chat(
             [
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": (
-                        f"Напиши один качественный комментарий в Threads на {language} языке.\n\n"
-                        f"Исходный пост:\n{post_text.strip()}{context}"
-                    ),
-                },
+                {"role": "user", "content": user_prompt},
             ],
-            temperature=0.78,
+            temperature=0.72,
         )
+
+        if self._looks_like_meta_output(draft):
+            draft = await self._chat(
+                [
+                    {
+                        "role": "system",
+                        "content": SYSTEM_PROMPT + (
+                            "\n\nКРИТИЧНО: вывод должен состоять только из текста, "
+                            "который можно сразу вставить в комментарий Threads."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            "/no_think\n"
+                            "Предыдущий ответ был рассуждением, а не комментарием. "
+                            "Сейчас верни только сам готовый комментарий без пояснений.\n\n"
+                            f"Пост:\n{post_text.strip()}{context}"
+                        ),
+                    },
+                ],
+                temperature=0.55,
+            )
+
+        if self._looks_like_meta_output(draft):
+            raise CommentGenerationError("Ollama returned reasoning instead of a ready comment")
+
         return self._trim(draft)
 
     async def regenerate(self, post_text: str, previous: str) -> str:
@@ -296,7 +348,7 @@ class OllamaCommentGenerator:
                 {
                     "role": "user",
                     "content": (
-                        f"Перепиши комментарий на {language} языке проще, короче и естественнее. "
+                        f"/no_think\nПерепиши комментарий на {language} языке проще, короче и естественнее. "
                         "Не сохраняй формулировки только ради сохранения. Если вопрос слабый, убери его.\n\n"
                         f"Пост:\n{post_text.strip()}\n\n"
                         f"Предыдущий вариант:\n{previous.strip()}"
