@@ -68,7 +68,22 @@ def _run_git(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]
     )
 
 
+def _ensure_git_identity() -> None:
+    """Configure a repo-local identity for automated queue commits.
+
+    This does not touch the user's global Git configuration.
+    """
+    name = _run_git("config", "--get", "user.name", check=False)
+    email = _run_git("config", "--get", "user.email", check=False)
+
+    if name.returncode != 0 or not name.stdout.strip():
+        _run_git("config", "user.name", "Threads ChatGPT Bridge", check=False)
+    if email.returncode != 0 or not email.stdout.strip():
+        _run_git("config", "user.email", "threads-bridge@local", check=False)
+
+
 def _sync_from_remote() -> None:
+    _ensure_git_identity()
     result = _run_git("pull", "--rebase", check=False)
     if result.returncode != 0:
         logging.warning("git pull --rebase failed: %s", (result.stderr or result.stdout).strip())
