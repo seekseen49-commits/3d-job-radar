@@ -19,10 +19,12 @@ async def main() -> None:
     if not profile_dir.is_absolute():
         profile_dir = BASE_DIR / profile_dir
     profile_dir.mkdir(parents=True, exist_ok=True)
+    channel = os.getenv("THREADS_BROWSER_CHANNEL", "msedge").strip() or "msedge"
 
     async with async_playwright() as p:
         context = await p.chromium.launch_persistent_context(
             user_data_dir=str(profile_dir),
+            channel=channel,
             headless=False,
             viewport={"width": 1440, "height": 1000},
             locale="ru-RU",
