@@ -30,11 +30,15 @@ class LocalThreadsSettings:
     owner_chat_id: int
     database_path: Path
     log_level: str
-    threads_access_token: str
+    threads_access_token: str | None
     threads_comments_enabled: bool
     threads_comment_queries: tuple[str, ...]
     threads_comment_scan_minutes: int
     threads_comment_own_username: str | None
+    threads_discovery_mode: str
+    threads_manual_reply_only: bool
+    threads_browser_profile_dir: Path
+    threads_browser_headless: bool
     ollama_base_url: str
     ollama_model: str
     ollama_vision_model: str | None
@@ -82,7 +86,7 @@ def load_local_settings() -> LocalThreadsSettings:
         owner_chat_id=owner_chat_id,
         database_path=database_path,
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
-        threads_access_token=_required("THREADS_ACCESS_TOKEN"),
+        threads_access_token=os.getenv("THREADS_ACCESS_TOKEN", "").strip() or None,
         threads_comments_enabled=_bool("THREADS_COMMENTS_ENABLED", True),
         threads_comment_queries=_csv(
             "THREADS_COMMENT_QUERIES",
@@ -90,6 +94,10 @@ def load_local_settings() -> LocalThreadsSettings:
         ),
         threads_comment_scan_minutes=max(_positive_int("THREADS_COMMENT_SCAN_MINUTES", 30), 15),
         threads_comment_own_username=os.getenv("THREADS_COMMENT_OWN_USERNAME", "").strip().lstrip("@") or None,
+        threads_discovery_mode=os.getenv("THREADS_DISCOVERY_MODE", "browser").strip().lower() or "browser",
+        threads_manual_reply_only=_bool("THREADS_MANUAL_REPLY_ONLY", True),
+        threads_browser_profile_dir=BASE_DIR / (os.getenv("THREADS_BROWSER_PROFILE_DIR", "threads_browser_profile").strip() or "threads_browser_profile"),
+        threads_browser_headless=_bool("THREADS_BROWSER_HEADLESS", True),
         ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").strip().rstrip("/"),
         ollama_model=os.getenv("OLLAMA_MODEL", "qwen3:4b").strip() or "qwen3:4b",
         ollama_vision_model=os.getenv("OLLAMA_VISION_MODEL", "qwen3-vl:4b").strip() or None,
@@ -134,7 +142,9 @@ async def run() -> None:
 
     try:
         logging.info(
-            "Локальный Threads-комментатор запущен. Модель=%s, vision=%s, Ollama=%s",
+            "Локальный Threads-комментатор запущен. discovery=%s, manual=%s, model=%s, vision=%s, Ollama=%s",
+            settings.threads_discovery_mode,
+            settings.threads_manual_reply_only,
             settings.ollama_model,
             settings.ollama_vision_model or "off",
             settings.ollama_base_url,
