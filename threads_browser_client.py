@@ -56,6 +56,17 @@ class ThreadsBrowserClient:
         pages = self._context.pages
         self._page = pages[0] if pages else await self._context.new_page()
         self._page.set_default_timeout(self.timeout_ms)
+
+        # Не загружаем картинки/видео в поисковом браузере: так профиль не раздувает
+        # кэш на диске. URL изображений остаются в DOM, а выбранную картинку при
+        # необходимости vision-модель забирает отдельно в RAM через httpx.
+        async def block_heavy_media(route):
+            if route.request.resource_type in {"image", "media", "font"}:
+                await route.abort()
+            else:
+                await route.continue_()
+
+        await self._page.route("**/*", block_heavy_media)
         return self._page
 
     async def close(self) -> None:
