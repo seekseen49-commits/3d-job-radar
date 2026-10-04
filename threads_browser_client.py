@@ -29,10 +29,12 @@ class ThreadsBrowserClient:
         profile_dir: Path,
         *,
         headless: bool = True,
+        channel: str = "msedge",
         timeout_ms: int = 30000,
     ) -> None:
         self.profile_dir = Path(profile_dir)
         self.headless = headless
+        self.channel = channel.strip() or "msedge"
         self.timeout_ms = timeout_ms
         self._playwright = None
         self._context: BrowserContext | None = None
@@ -46,6 +48,7 @@ class ThreadsBrowserClient:
         self._playwright = await async_playwright().start()
         self._context = await self._playwright.chromium.launch_persistent_context(
             user_data_dir=str(self.profile_dir),
+            channel=self.channel,
             headless=self.headless,
             viewport={"width": 1440, "height": 1000},
             locale="ru-RU",
