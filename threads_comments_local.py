@@ -1,6 +1,6 @@
 """Локальный запуск только ассистента комментариев Threads.
 
-Нужны только BOT_TOKEN, OWNER_CHAT_ID и THREADS_ACCESS_TOKEN.
+Нужны THREADS_COMMENT_BOT_TOKEN (или BOT_TOKEN как запасной вариант), OWNER_CHAT_ID и THREADS_ACCESS_TOKEN.
 Основной Job Radar может продолжать работать через GitHub Actions.
 """
 from __future__ import annotations
@@ -77,7 +77,7 @@ def load_local_settings() -> LocalThreadsSettings:
         database_path = BASE_DIR / database_path
 
     return LocalThreadsSettings(
-        bot_token=_required("BOT_TOKEN"),
+        bot_token=(os.getenv("THREADS_COMMENT_BOT_TOKEN", "").strip() or _required("BOT_TOKEN")),
         owner_chat_id=owner_chat_id,
         database_path=database_path,
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
