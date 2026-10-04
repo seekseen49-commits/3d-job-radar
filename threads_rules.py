@@ -58,10 +58,6 @@ def ineligibility_reason(
         return "not_fresh"
     if own_username and post.username.lower() == own_username.strip().lstrip("@").lower():
         return "own_post"
-    # Жёсткий тематический шлюз: пост должен содержать явный признак наших сфер.
-    # Слова "работа", "клиент", "заказ" без 3D/дизайна/монтажа/GameDev больше не проходят.
-    if not CREATIVE_DOMAIN_RE.search(text):
-        return "outside_domain"
     if URL_RE.search(text) and len(text) < 120:
         return "short_with_url"
     if PROMO_RE.search(text):
