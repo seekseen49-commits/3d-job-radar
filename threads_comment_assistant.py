@@ -86,54 +86,77 @@ class ThreadsCommentAssistant:
     async def scan_once(self) -> int:
         if self.is_paused():
             return 0
-        async with self._scan_lock:
-            query = self._next_query()
-            logging.info("Threads comments: search query=%r", query)
-            posts = await self.client.search_recent(query, limit=30)
-            candidates = [
-                post
-                for post in posts
-                if not self.db.has_threads_comment_post(post.id)
-                and eligible_post(post, own_username=self.settings.threads_comment_own_username)
-            ]
-            candidates.sort(key=self._candidate_score, reverse=True)
-            if not candidates:
-                logging.info("Threads comments: no new candidates for query=%r", query)
-                return 0
 
-            post: ThreadPost | None = None
-            for candidate in candidates[:6]:
-                try:
-                    if await self.generator.is_relevant(candidate.text):
-                        post = candidate
-                        break
-                except Exception:
-                    logging.exception("Threads comments: relevance check failed for post=%s", candidate.id)
+        async with self._scan_lock:
+            queries_to_try = min(6, len(self.settings.threads_comment_queries))
+
+            for _ in range(queries_to_try):
+                query = self._next_query()
+                logging.info("Threads comments: search query=%r", query)
+
+                posts = await self.client.search_recent(query, limit=30)
+                candidates = [
+                    post
+                    for post in posts
+                    if not self.db.has_threads_comment_post(post.id)
+                    and eligible_post(post, own_username=self.settings.threads_comment_own_username)
+                ]
+                candidates.sort(key=self._candidate_score, reverse=True)
+
+                if not candidates:
+                    logging.info("Threads comments: no new candidates for query=%r", query)
                     continue
 
-            if post is None:
-                logging.info("Threads comments: Ollama rejected all candidates for query=%r", query)
-                return 0
+                post: ThreadPost | None = None
+                for candidate in candidates[:5]:
+                    try:
+                        if await self.generator.is_relevant(candidate.text):
+                            post = candidate
+                            break
+                    except Exception:
+                        logging.exception(
+                            "Threads comments: relevance check failed for post=%s",
+                            candidate.id,
+                        )
+                        continue
 
-            draft = await self.generator.generate(post.text)
-            self.db.save_threads_comment_draft(
-                post.id,
-                post.username,
-                post.text,
-                post.permalink,
-                draft,
+                if post is None:
+                    logging.info(
+                        "Threads comments: Ollama rejected all candidates for query=%r",
+                        query,
+                    )
+                    continue
+
+                draft = await self.generator.generate(post.text)
+                self.db.save_threads_comment_draft(
+                    post.id,
+                    post.username,
+                    post.text,
+                    post.permalink,
+                    draft,
+                )
+                row = self.db.get_threads_comment_post(post.id)
+                if row is None:
+                    raise RuntimeError("Threads draft disappeared after save")
+
+                await self.bot.send_message(
+                    self.settings.owner_chat_id,
+                    self.format_card(row),
+                    reply_markup=_keyboard(post.id),
+                    disable_web_page_preview=True,
+                )
+                logging.info(
+                    "Threads comments: draft created for post=%s query=%r",
+                    post.id,
+                    query,
+                )
+                return 1
+
+            logging.info(
+                "Threads comments: no suitable post found after %s queries",
+                queries_to_try,
             )
-            row = self.db.get_threads_comment_post(post.id)
-            if row is None:
-                raise RuntimeError("Threads draft disappeared after save")
-            await self.bot.send_message(
-                self.settings.owner_chat_id,
-                self.format_card(row),
-                reply_markup=_keyboard(post.id),
-                disable_web_page_preview=True,
-            )
-            logging.info("Threads comments: draft created for post=%s query=%r", post.id, query)
-            return 1
+            return 0
 
     async def publish(self, post_id: str) -> str:
         row = self.db.get_threads_comment_post(post_id)
