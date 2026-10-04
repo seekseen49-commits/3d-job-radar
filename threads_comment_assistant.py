@@ -80,7 +80,11 @@ class ThreadsCommentAssistant:
         self.db = db
         self.bot = bot
         self.client = ThreadsClient(settings.threads_access_token)
-        self.generator = OllamaCommentGenerator(settings.ollama_base_url, settings.ollama_model)
+        self.generator = OllamaCommentGenerator(
+            settings.ollama_base_url,
+            settings.ollama_model,
+            vision_model=getattr(settings, "ollama_vision_model", None),
+        )
         self._scan_lock = asyncio.Lock()
 
     def is_paused(self) -> bool:
@@ -198,20 +202,44 @@ class ThreadsCommentAssistant:
                 return_exceptions=True,
             )
 
+            # Визуальный анализ дороже обычного текста, поэтому смотрим максимум
+            # первые 8 наиболее перспективных кандидатов. Остальные всё равно
+            # получают alt_text и контекст ответов.
+            vision_results = await asyncio.gather(
+                *(
+                    self.generator.describe_visuals(post.image_urls)
+                    if index < 8 and post.image_urls
+                    else asyncio.sleep(0, result=None)
+                    for index, post in enumerate(candidates)
+                ),
+                return_exceptions=True,
+            )
+
             candidate_contexts: list[str] = []
             extra_context_by_id: dict[str, str] = {}
-            for post, replies_result in zip(candidates, reply_results):
+            for post, replies_result, vision_result in zip(
+                candidates,
+                reply_results,
+                vision_results,
+            ):
                 parts = [post.text]
                 extra_parts: list[str] = []
+
                 if post.alt_text:
-                    extra_parts.append(f"Описание изображения/видео: {post.alt_text}")
+                    extra_parts.append(f"Alt-текст медиа: {post.alt_text}")
+
+                if not isinstance(vision_result, Exception) and vision_result:
+                    extra_parts.append(f"Что видно на медиа: {vision_result}")
+
                 if not isinstance(replies_result, Exception) and replies_result:
                     replies = replies_result[:5]
                     extra_parts.append("Комментарии под постом: " + " | ".join(replies))
+
                 if extra_parts:
                     extra = "\n".join(extra_parts)
                     extra_context_by_id[post.id] = extra
                     parts.append(extra)
+
                 candidate_contexts.append("\n".join(parts))
 
             try:
