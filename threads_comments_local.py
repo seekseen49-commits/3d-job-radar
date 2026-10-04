@@ -65,7 +65,7 @@ def _csv(name: str, default: str) -> tuple[str, ...]:
 
 
 def load_local_settings() -> LocalThreadsSettings:
-    load_dotenv(BASE_DIR / ".env")
+    load_dotenv(BASE_DIR / ".env", override=True)
     try:
         owner_chat_id = int(_required("OWNER_CHAT_ID"))
     except ValueError as exc:
