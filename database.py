@@ -84,11 +84,16 @@ class Database:
         self.set_value("paused", "1" if paused else "0")
 
     def has_threads_comment_post(self, post_id: str) -> bool:
+        """True only when a post is already actively handled.
+
+        Failed generations are intentionally retryable: a temporary Ollama error
+        must not remove a good Threads post from all future scans.
+        """
         row = self.connection.execute(
-            "SELECT 1 FROM threads_comment_posts WHERE post_id = ?",
+            "SELECT status FROM threads_comment_posts WHERE post_id = ?",
             (post_id,),
         ).fetchone()
-        return row is not None
+        return bool(row and row["status"] in {"drafted", "sent", "skipped"})
 
     def save_threads_comment_draft(
         self,
