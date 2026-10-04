@@ -276,60 +276,45 @@ class ThreadsCommentAssistant:
 
             ranked_pool = sorted(pool.values(), key=self._candidate_score, reverse=True)
             russian_pool = [post for post in ranked_pool if re.search(r"[А-Яа-яЁё]", post.text)]
-            fallback_pool = [post for post in ranked_pool if post not in russian_pool]
 
-            async def keep_relevant(batch: list[ThreadPost]) -> tuple[list[ThreadPost], list[str]]:
-                batch = batch[:10]
-                contexts = [
-                    "\n".join(
-                        part
-                        for part in (
-                            post.text,
-                            f"Alt-текст медиа: {post.alt_text}" if post.alt_text else "",
-                        )
-                        if part
+            # Поиск уже идёт только по профильным запросам. Не заставляем маленькую
+            # локальную модель второй раз решать, "наша ли это тема": именно этот
+            # слой давал ложные отказы и пустые /threads_scan.
+            # Русские посты приоритетны; английские — fallback.
+            candidates = (russian_pool or ranked_pool)[:10]
+            candidate_contexts = [
+                "\n".join(
+                    part
+                    for part in (
+                        post.text,
+                        f"Alt-текст медиа: {post.alt_text}" if post.alt_text else "",
                     )
-                    for post in batch
-                ]
-                if not batch:
-                    return [], []
-                logging.info("Threads comments: relevance-filtering %s candidates", len(batch))
-                indexes = await self.generator.filter_relevant(contexts)
-                return (
-                    [batch[index] for index in indexes],
-                    [contexts[index] for index in indexes],
+                    if part
                 )
-
-            # Сначала проверяем русскоязычные посты. Если среди них ничего реально
-            # подходящего нет, только тогда делаем второй проход по английским.
-            try:
-                candidates, candidate_contexts = await keep_relevant(russian_pool)
-                if not candidates:
-                    candidates, candidate_contexts = await keep_relevant(fallback_pool)
-            except Exception:
-                logging.exception("Threads comments: relevance filtering failed")
-                return 0
+                for post in candidates
+            ]
 
             logging.info(
-                "Threads comments: language preference russian=%s, relevant=%s",
-                len(russian_pool),
+                "Threads comments: curated candidates=%s, russian=%s",
                 len(candidates),
+                len(russian_pool),
             )
 
             if not candidates:
-                logging.info("Threads comments: no candidates matched the account interests")
+                logging.info("Threads comments: no curated candidates after deterministic filters")
                 return 0
 
-            logging.info("Threads comments: ranking %s relevant candidates by text", len(candidates))
+            logging.info("Threads comments: ranking %s curated candidates by text", len(candidates))
             try:
                 choice = await self.generator.choose_best(candidate_contexts)
             except Exception:
-                logging.exception("Threads comments: batch ranking failed")
-                return 0
+                logging.exception("Threads comments: ranking failed; using top deterministic candidate")
+                choice = 0
 
             if choice is None:
-                logging.info("Threads comments: Ollama rejected relevant candidate pool")
-                return 0
+                # Curated query + freshness/safety filters already established relevance.
+                # A weak local ranker must not turn a valid batch into "ничего не найдено".
+                choice = 0
 
             post = candidates[choice]
             logging.info("Threads comments: selected post=%s, enriching one post", post.id)
