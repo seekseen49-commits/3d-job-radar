@@ -31,23 +31,39 @@ def _is_fresh(timestamp: str | None, *, max_age_hours: int = 24) -> bool:
     return -timedelta(minutes=5) <= age <= timedelta(hours=max_age_hours)
 
 
+def ineligibility_reason(
+    post: ThreadPost,
+    *,
+    own_username: str | None = None,
+    max_age_hours: int = 24,
+) -> str | None:
+    """Вернуть причину отклонения поста или None, если пост подходит."""
+    text = post.text.strip()
+    if len(text) < 25:
+        return "too_short"
+    if not post.timestamp:
+        return "missing_timestamp"
+    if not _is_fresh(post.timestamp, max_age_hours=max_age_hours):
+        return "not_fresh"
+    if own_username and post.username.lower() == own_username.strip().lstrip("@").lower():
+        return "own_post"
+    if URL_RE.search(text) and len(text) < 120:
+        return "short_with_url"
+    if PROMO_RE.search(text):
+        return "promo"
+    if RISK_RE.search(text):
+        return "risk"
+    return None
+
+
 def eligible_post(
     post: ThreadPost,
     *,
     own_username: str | None = None,
     max_age_hours: int = 24,
 ) -> bool:
-    text = post.text.strip()
-    if len(text) < 25:
-        return False
-    if not _is_fresh(post.timestamp, max_age_hours=max_age_hours):
-        return False
-    if own_username and post.username.lower() == own_username.strip().lstrip("@").lower():
-        return False
-    if URL_RE.search(text) and len(text) < 120:
-        return False
-    if PROMO_RE.search(text):
-        return False
-    if RISK_RE.search(text):
-        return False
-    return True
+    return ineligibility_reason(
+        post,
+        own_username=own_username,
+        max_age_hours=max_age_hours,
+    ) is None
