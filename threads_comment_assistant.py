@@ -16,7 +16,7 @@ from comment_generator import OllamaCommentGenerator
 from config import Settings
 from database import Database
 from threads_client import ThreadPost, ThreadsClient
-from threads_rules import eligible_post
+from threads_rules import ineligibility_reason
 
 
 
@@ -164,26 +164,35 @@ class ThreadsCommentAssistant:
 
             pool: dict[str, ThreadPost] = {}
             total_returned = 0
+            rejection_counts: dict[str, int] = {}
+            sample_timestamps: list[str] = []
             for query, result in zip(queries, results):
                 if isinstance(result, Exception):
                     logging.warning("Threads comments: query=%r failed: %s", query, result)
                     continue
                 total_returned += len(result)
                 for post in result:
+                    if len(sample_timestamps) < 5:
+                        sample_timestamps.append(post.timestamp or "<missing>")
                     if self.db.has_threads_comment_post(post.id):
+                        rejection_counts["already_seen"] = rejection_counts.get("already_seen", 0) + 1
                         continue
-                    if not eligible_post(
+                    reason = ineligibility_reason(
                         post,
                         own_username=self.settings.threads_comment_own_username,
                         max_age_hours=24,
-                    ):
+                    )
+                    if reason:
+                        rejection_counts[reason] = rejection_counts.get(reason, 0) + 1
                         continue
                     pool[post.id] = post
 
             logging.info(
-                "Threads comments: API returned=%s, fresh eligible unique=%s",
+                "Threads comments: API returned=%s, fresh eligible unique=%s, rejected=%r, timestamp_samples=%r",
                 total_returned,
                 len(pool),
+                rejection_counts,
+                sample_timestamps,
             )
 
             if not pool:
