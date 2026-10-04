@@ -12,7 +12,8 @@ CYRILLIC_RE = re.compile(r"[А-Яа-яЁё]")
 
 INTEREST_PROFILE = """
 Какие посты этому аккаунту обычно интересны:
-- фриланс, поиск заказов, биржи, клиенты и заказчики;
+- фриланс именно в цифровых/креативных профессиях: 3D, CG, дизайн, монтаж, motion, GameDev, AI-инструменты;
+- поиск заказов, биржи, клиенты, правки, цены и дедлайны только когда речь о такой цифровой/креативной работе;
 - работа в креативных профессиях, портфолио, собеседования, рынок и карьера;
 - видеомонтаж, motion design, After Effects;
 - Blender, 3D, моделирование, рендер, материалы, анимация и 3D-печать;
@@ -23,6 +24,9 @@ INTEREST_PROFILE = """
 
 Не нужны случайные новости, политика, медицина, отношения, провокационный контент и темы,
 к которым у аккаунта нет естественного отношения.
+Не подходят посты про цветы, флористику, еду, магазины, физические товары, бытовые услуги,
+косметологию и другие офлайн-бизнесы только потому, что там встречаются слова "заказ",
+"клиент", "фриланс" или "работа".
 """.strip()
 
 SYSTEM_PROMPT = f"""Ты пишешь комментарии от лица креативного фрилансера в Threads.
@@ -77,11 +81,14 @@ RELEVANCE_PROMPT = f"""Реши, подходит ли пост для комм�
 Ответь только YES или NO.
 
 YES если:
-- тема входит в интересы аккаунта;
+- пост напрямую связан с 3D/Blender/CG/GameDev/монтажом/motion/дизайном/AI в креативной работе;
+- ИЛИ это общий фриланс/клиенты/правки/деньги/выгорание, но контекст явно цифровая или креативная профессия;
 - есть что добавить по делу, спросить или нормально отреагировать;
 - это не прямая реклама, вакансия или бессодержательный пост.
 
 NO если:
+- пост про другой бизнес или профессию: флористика, еда, магазины, физические товары, бытовые услуги и т.п.;
+- единственная связь с нашими интересами — слова "заказ", "клиент", "работа", "фриланс";
 - тема случайная и не связана с интересами;
 - комментарий пришлось бы натягивать ради активности;
 - пост слишком конфликтный, рискованный или рекламный.
@@ -93,12 +100,14 @@ RANK_PROMPT = f"""Выбери ОДИН пост, под которым этом
 {INTEREST_PROFILE}
 
 Приоритет:
-- пост реально цепляет тему аккаунта;
+- пост прямо относится к 3D/Blender/CG/GameDev/монтажу/motion/дизайну/AI или к фрилансу внутри этих сфер;
+- общие слова "заказ", "клиент", "работа" сами по себе НЕ делают пост подходящим;
+- пост про флористику, еду, магазины, физические товары и другие чужие офлайн-сферы нужно игнорировать;
 - есть конкретная деталь, к которой можно привязать мысль;
 - можно добавить опытный/любопытный угол, а не просто похвалить;
 - живые посты обычных людей лучше рекламы, вакансий и продаж.
 
-Верни только номер поста. Если все варианты слабые, верни NONE.
+Верни только номер поста. Если нет ни одного поста из нужных сфер, верни NONE.
 """
 
 
@@ -315,6 +324,71 @@ class OllamaCommentGenerator:
             temperature=0.05,
         )
         return result.strip().upper().startswith("YES")
+
+    async def filter_relevant(self, post_texts: list[str]) -> list[int]:
+        """Одним локальным запросом оставить только посты из нужных тем."""
+        if not post_texts:
+            return []
+
+        numbered = []
+        for index, text in enumerate(post_texts, start=1):
+            compact = " ".join(text.split())
+            if len(compact) > 420:
+                compact = compact[:417].rstrip() + "..."
+            numbered.append(f"{index}. {compact}")
+
+        schema = {
+            "type": "object",
+            "properties": {
+                "relevant": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "Номера только действительно релевантных постов.",
+                }
+            },
+            "required": ["relevant"],
+            "additionalProperties": False,
+        }
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.post(
+                f"{self.base_url}/api/chat",
+                json={
+                    "model": self.model,
+                    "stream": False,
+                    "think": False,
+                    "format": schema,
+                    "messages": [
+                        {"role": "system", "content": RELEVANCE_PROMPT},
+                        {
+                            "role": "user",
+                            "content": (
+                                "/no_think\n"
+                                "Ниже несколько постов. Верни номера только тех, под которыми "
+                                "этому аккаунту действительно уместно комментировать. "
+                                "Не пропускай посты из чужих офлайн-сфер только из-за слов "
+                                "заказ/клиент/работа.\n\n" + "\n\n".join(numbered)
+                            ),
+                        },
+                    ],
+                    "options": {"temperature": 0.05},
+                },
+            )
+        if response.is_error:
+            raise CommentGenerationError(f"Ollama relevance filter returned HTTP {response.status_code}")
+
+        payload = response.json()
+        raw = str(payload.get("message", {}).get("content") or "").strip()
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise CommentGenerationError("Ollama returned invalid relevance JSON") from exc
+
+        selected: list[int] = []
+        for value in parsed.get("relevant", []):
+            if isinstance(value, int) and 1 <= value <= len(post_texts):
+                selected.append(value - 1)
+        return list(dict.fromkeys(selected))
 
     async def choose_best(self, post_texts: list[str]) -> int | None:
         if not post_texts:
