@@ -29,3 +29,9 @@ def test_skips_obvious_promo() -> None:
 
 def test_skips_risky_topic() -> None:
     assert not eligible_post(post("Политическая партия обсуждает выборы и новые решения для страны."))
+
+
+def test_accepts_organic_learning_discussion() -> None:
+    assert eligible_post(
+        post("Закончила курс по Blender и наконец поняла, почему раньше так странно ставила свет в Eevee.")
+    )
