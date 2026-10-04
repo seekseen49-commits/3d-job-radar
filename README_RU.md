@@ -274,11 +274,18 @@ python scan_history.py --limit 100
 ### Что нужно
 
 1. В `.env` уже должен быть рабочий `THREADS_ACCESS_TOKEN`.
-2. Установите Ollama на машине, где постоянно работает `main.py`, и один раз загрузите локальную модель:
+2. Установите Ollama на машине, где постоянно работает `main.py`, и один раз загрузите обе локальные модели:
 
 ```powershell
 ollama pull qwen3:4b
+ollama pull qwen3-vl:4b
 ```
+
+Для полного режима токен Threads должен быть выдан со scopes:
+`threads_basic`, `threads_keyword_search`, `threads_read_replies`,
+`threads_content_publish`, `threads_manage_replies`.
+После добавления нового scope в Meta старый токен не расширяется сам: получите новый токен и замените
+`THREADS_ACCESS_TOKEN` в локальном `.env`.
 
 3. Добавьте в `.env`:
 
@@ -302,6 +309,7 @@ python -m pip install -r requirements.txt
 ### Команды в Telegram
 
 - `/threads_comments` — статистика черновиков и публикаций;
+- `/threads_check` — безопасно проверить Threads API, Keyword Search, чтение replies и обе Ollama-модели;
 - `/threads_scan` — найти один свежий пост прямо сейчас;
 - `/threads_pause` — временно остановить поиск;
 - `/threads_resume` — возобновить поиск.
@@ -338,7 +346,7 @@ ollama list
 curl.exe http://127.0.0.1:11434/api/tags
 ```
 
-Если модель `qwen3:4b` видна, добавьте в локальный `.env`:
+Если модели `qwen3:4b` и `qwen3-vl:4b` видны, добавьте в локальный `.env`:
 
 ```env
 THREADS_COMMENTS_ENABLED=true
