@@ -80,7 +80,7 @@ class ThreadsClient:
                 "q": query,
                 "search_type": "RECENT",
                 "limit": max(1, min(limit, 50)),
-                "fields": "id,text,username,permalink,timestamp,media_type,media_url,thumbnail_url,alt_text,has_replies,children{id,media_type,media_url,thumbnail_url,alt_text}",
+                "fields": "id,text,username,permalink,timestamp,media_type,media_url,thumbnail_url,alt_text,has_replies,children",
             },
         )
         posts: list[ThreadPost] = []
