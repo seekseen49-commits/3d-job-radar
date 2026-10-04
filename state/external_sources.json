@@ -11,7 +11,7 @@
     "10d0b478f83bf5ba866e101e18199757b4e46ba0780508e088230fec6dafe56b": "2026-09-18T17:18:13.374625+00:00",
     "1155b3c6d54ec7dfc613343f418a8798c15e0241dc895ae598c396ec0bb190e7": "2026-09-06T20:56:13.321491+00:00",
     "115a1bc30513dfb13d5ede02622305a3f921acff2026faa20dbacc62faf2ff99": "2026-10-01T09:00:14.585504+00:00",
-    "143bee1ec0dddb963e998dac72e6ee0e49b6b234ffcdecd1363cb1c7bf568843": "2026-09-09T21:01:08.836522+00:00",
+    "143bee1ec0dddb963e998dac72e6ee0e49b6b234ffcdecd1363cb1c7bf568843": "2026-10-04T06:26:50.154421+00:00",
     "15b34858460e113df5363860d4fe3f33000c018480f58e9e98e829c0ea8c2ef5": "2026-09-20T20:37:30.532026+00:00",
     "15f63266bb4c62f610abc17fc161f04d0ceb173d1f6acda3e5587e94a8e553a2": "2026-09-10T23:06:05.711647+00:00",
     "16ce46ac8678905731ab2cce2f446067da7155fe62dcc1fefe79f31662598ac5": "2026-09-14T05:06:00.977955+00:00",
@@ -161,9 +161,9 @@
   },
   "last_poll_at": {
     "Himalayas": "2026-10-02T13:00:31.227826+00:00",
-    "Jobicy": "2026-10-04T00:46:04.989577+00:00",
+    "Jobicy": "2026-10-04T06:26:58.703755+00:00",
     "Remotive": "2026-10-04T00:46:05.449891+00:00",
-    "Threads": "2026-10-04T00:45:55.075515+00:00"
+    "Threads": "2026-10-04T06:26:47.403899+00:00"
   },
   "processed": {
     "Himalayas:https://himalayas.app/companies/2289-bp-sg-pte-ltd-shipping/jobs/reliability-engineer-truck-service-9281369049": "2026-09-04T20:50:46.552947+00:00",
@@ -324,6 +324,7 @@
     "Himalayas:https://himalayas.app/companies/epoch-games/jobs/lead-3d-game-artist": "2026-09-20T20:37:30.532026+00:00",
     "Himalayas:https://himalayas.app/companies/epoch-games/jobs/reallusion-character-creator-3d-artist": "2026-09-20T20:37:30.532026+00:00",
     "Himalayas:https://himalayas.app/companies/epoch-games/jobs/unreal-engine-technical-artist": "2026-09-19T18:48:32.846354+00:00",
+    "Himalayas:https://himalayas.app/companies/evolution-sports-group/jobs/remote-bim-modeler-3d-visualization-specialist": "2026-10-04T06:26:50.154421+00:00",
     "Himalayas:https://himalayas.app/companies/exodigo/jobs/senior-3d-bim-modeler": "2026-09-30T07:28:20.011405+00:00",
     "Himalayas:https://himalayas.app/companies/exodigo/jobs/senior-cad-bim-drafter-modeler": "2026-09-14T05:06:00.977955+00:00",
     "Himalayas:https://himalayas.app/companies/expedock/jobs/3d-scene-reviewer-environment-artist-5032008932": "2026-09-20T20:37:30.532026+00:00",
@@ -608,12 +609,16 @@
     "Himalayas:https://himalayas.app/companies/scalejet/jobs/amazon-graphic-designer-9663499724": "2026-09-15T06:55:13.730236+00:00",
     "Himalayas:https://himalayas.app/companies/scalejet/jobs/amazon-product-development-manager-9761105097": "2026-09-23T23:10:56.770859+00:00",
     "Himalayas:https://himalayas.app/companies/scalejet/jobs/marketplace-creative-strategist-amazon-graphic-designer": "2026-10-03T22:14:47.646532+00:00",
+    "Himalayas:https://himalayas.app/companies/scalejet/jobs/marketplace-creative-strategist-amazon-graphic-designer-1228749712": "2026-10-04T06:26:50.154421+00:00",
     "Himalayas:https://himalayas.app/companies/scalejet/jobs/marketplace-creative-strategist-amazon-graphic-designer-3589356398": "2026-10-03T22:14:47.646532+00:00",
+    "Himalayas:https://himalayas.app/companies/scalejet/jobs/marketplace-creative-strategist-amazon-graphic-designer-3762012883": "2026-10-04T06:26:50.154421+00:00",
+    "Himalayas:https://himalayas.app/companies/scalejet/jobs/marketplace-creative-strategist-amazon-graphic-designer-7073201998": "2026-10-04T06:26:50.154421+00:00",
     "Himalayas:https://himalayas.app/companies/scalepex/jobs/ux-designer-fully-remote-mexico-only": "2026-09-23T23:10:56.770859+00:00",
     "Himalayas:https://himalayas.app/companies/scalepex/jobs/ux-researcher-remote-only-mexico-9327332802": "2026-09-23T23:10:56.770859+00:00",
     "Himalayas:https://himalayas.app/companies/scentbird/jobs/marketing-analyst": "2026-09-24T23:28:55.466275+00:00",
     "Himalayas:https://himalayas.app/companies/sd-solutions/jobs/gaming-client-1-senior-technical-artist": "2026-09-08T21:01:07.224272+00:00",
     "Himalayas:https://himalayas.app/companies/sd-solutions/jobs/gaming-client-1-senior-ui-2d-artist-eu": "2026-09-09T21:01:08.836522+00:00",
+    "Himalayas:https://himalayas.app/companies/sd-solutions/jobs/gaming-client-1-senior-ui-2d-artist-eu-6727567289": "2026-10-04T06:26:50.154421+00:00",
     "Himalayas:https://himalayas.app/companies/secret-6/jobs/3d-hard-surface-artists-mid-to-senior-level": "2026-09-21T20:59:45.688243+00:00",
     "Himalayas:https://himalayas.app/companies/sequoia-connect/jobs/technology-risk-and-controls-engineer": "2026-09-27T00:37:54.023625+00:00",
     "Himalayas:https://himalayas.app/companies/sidekick/jobs/ecommerce-video-editor": "2026-09-27T00:37:54.023625+00:00",
@@ -663,6 +668,7 @@
     "Himalayas:https://himalayas.app/companies/the-new-york-times/jobs/senior-manager-audience-product-analytics-nyt-wirecutter": "2026-09-28T00:58:51.527764+00:00",
     "Himalayas:https://himalayas.app/companies/theabstract/jobs/product-evangelist-remote-contractor": "2026-09-08T21:01:07.224272+00:00",
     "Himalayas:https://himalayas.app/companies/thehivecareers/jobs/business-analyst-agile-2077427267": "2026-10-01T09:00:14.585504+00:00",
+    "Himalayas:https://himalayas.app/companies/thehivecareers/jobs/business-analyst-agile-585261190": "2026-10-04T06:26:50.154421+00:00",
     "Himalayas:https://himalayas.app/companies/thehivecareers/jobs/client-and-product-strategy-manager-2944745287": "2026-09-08T21:01:07.224272+00:00",
     "Himalayas:https://himalayas.app/companies/thehivecareers/jobs/client-and-product-strategy-manager-4618923305": "2026-09-06T20:56:13.321491+00:00",
     "Himalayas:https://himalayas.app/companies/thehivecareers/jobs/client-and-product-strategy-manager-8603649724": "2026-09-06T20:56:13.321491+00:00",
@@ -3802,10 +3808,11 @@
       "2026-10-03T16:15:07.561578+00:00",
       "2026-10-03T19:18:11.127354+00:00",
       "2026-10-03T22:14:42.548863+00:00",
-      "2026-10-04T00:45:55.075515+00:00"
+      "2026-10-04T00:45:55.075515+00:00",
+      "2026-10-04T06:26:47.403899+00:00"
     ],
     "last_authorization_check_at": "2026-10-04T00:45:55.075515+00:00",
-    "last_keyword_attempt_at": "2026-10-04T00:45:55.075515+00:00",
-    "next_keyword_index": 5
+    "last_keyword_attempt_at": "2026-10-04T06:26:47.403899+00:00",
+    "next_keyword_index": 0
   }
 }
