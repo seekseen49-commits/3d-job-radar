@@ -206,29 +206,51 @@ class ThreadsCommentAssistant:
                 if len(queries) >= 40:
                     break
 
+            browser_max_age_hours = 72
             if self.discovery_mode == "browser":
-                # В браузерном режиме вообще не используем широкие "клиент/работа/заказ".
-                # Только запросы, которые уже сами указывают на нужную профессию/сферу.
+                # В браузерном режиме используем только профильные запросы.
+                # Ищем адаптивно: обычно хватает 2-4 запросов, но если результатов
+                # мало, автоматически продолжаем до 10 запросов вместо ложного
+                # "ничего не найдено".
                 browser_queries = list(BROWSER_DISCOVERY_QUERIES)
                 browser_index = int(self.db.get_value("threads_browser_query_index", "0") or "0")
                 browser_index %= len(browser_queries)
                 rotated_queries = browser_queries[browser_index:] + browser_queries[:browser_index]
-                queries = rotated_queries[:4]
-                self.db.set_value(
-                    "threads_browser_query_index",
-                    str((browser_index + 4) % len(browser_queries)),
-                )
 
-            logging.info("Threads comments: scanning mode=%s queries=%r", self.discovery_mode, queries)
-            if self.discovery_mode == "browser":
                 if self.browser_client is None:
                     raise RuntimeError("Browser discovery is not initialized")
+
                 results = []
-                for query in queries:
+                queries = []
+                provisional_ids: set[str] = set()
+                for query in rotated_queries[:10]:
+                    queries.append(query)
                     try:
-                        results.append(await self.browser_client.search_recent(query, limit=12))
+                        result = await self.browser_client.search_recent(query, limit=12)
                     except Exception as exc:
-                        results.append(exc)
+                        result = exc
+                    results.append(result)
+
+                    if not isinstance(result, Exception):
+                        for post in result:
+                            if post.id in provisional_ids:
+                                continue
+                            if self.db.has_threads_comment_post(post.id):
+                                continue
+                            if ineligibility_reason(
+                                post,
+                                own_username=self.settings.threads_comment_own_username,
+                                max_age_hours=browser_max_age_hours,
+                            ) is None:
+                                provisional_ids.add(post.id)
+
+                    if len(provisional_ids) >= 8:
+                        break
+
+                self.db.set_value(
+                    "threads_browser_query_index",
+                    str((browser_index + max(1, len(queries))) % len(browser_queries)),
+                )
             else:
                 if self.client is None:
                     raise RuntimeError("Threads API client is not initialized")
@@ -236,6 +258,8 @@ class ThreadsCommentAssistant:
                     *(self.client.search_recent(query, limit=30, max_age_hours=24) for query in queries),
                     return_exceptions=True,
                 )
+
+            logging.info("Threads comments: scanning mode=%s queries=%r", self.discovery_mode, queries)
 
             pool: dict[str, ThreadPost] = {}
             total_returned = 0
@@ -255,7 +279,7 @@ class ThreadsCommentAssistant:
                     reason = ineligibility_reason(
                         post,
                         own_username=self.settings.threads_comment_own_username,
-                        max_age_hours=24,
+                        max_age_hours=browser_max_age_hours if self.discovery_mode == "browser" else 24,
                     )
                     if reason:
                         rejection_counts[reason] = rejection_counts.get(reason, 0) + 1
