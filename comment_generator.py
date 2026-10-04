@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import re
 
 import httpx
@@ -108,9 +109,11 @@ class CommentGenerationError(RuntimeError):
 
 
 META_OUTPUT_RE = re.compile(
-    r"(мне нужно|нужно написать|сначала|исходн(?:ый|ого) пост|пользователь|"
-    r"комментарий должен|задача|инструкц|проанализ|вариант комментария|"
-    r"хорошо,?\s*(?:мне|нужно)|i need to|first,? i|the user|analysis)",
+    r"(мне нужно написать|нужно написать комментарий|сначала (?:посмотрю|разберу|проанализ)|"
+    r"исходн(?:ый|ого) пост|пользователь (?:пишет|говорит|просит)|"
+    r"комментарий должен|задача\s*:|инструкц|проанализир|вариант комментария|"
+    r"хорошо,?\s*(?:мне нужно|нужно написать)|i need to write|first,? i(?:'ll| will)|"
+    r"the user (?:says|asks)|analysis\s*:)",
     re.I,
 )
 
@@ -151,6 +154,54 @@ class OllamaCommentGenerator:
         if not text:
             raise CommentGenerationError("Ollama returned an empty comment")
         return text
+
+    async def _chat_comment(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float,
+    ) -> str:
+        """Получить только готовый комментарий через structured JSON output."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "comment": {
+                    "type": "string",
+                    "description": "Только готовый текст комментария Threads без пояснений и анализа.",
+                }
+            },
+            "required": ["comment"],
+            "additionalProperties": False,
+        }
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.post(
+                f"{self.base_url}/api/chat",
+                json={
+                    "model": self.model,
+                    "stream": False,
+                    "think": False,
+                    "format": schema,
+                    "messages": messages,
+                    "options": {"temperature": temperature},
+                },
+            )
+        if response.is_error:
+            raise CommentGenerationError(f"Ollama returned HTTP {response.status_code}")
+
+        payload = response.json()
+        raw = str(payload.get("message", {}).get("content") or "").strip()
+        if not raw:
+            raise CommentGenerationError("Ollama returned an empty structured response")
+
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise CommentGenerationError("Ollama returned invalid structured JSON") from exc
+
+        comment = self._clean_model_output(str(parsed.get("comment") or "").strip())
+        if not comment:
+            raise CommentGenerationError("Ollama returned an empty structured comment")
+        return comment
 
     async def _download_images(self, urls: tuple[str, ...], *, limit: int = 2) -> list[str]:
         images: list[str] = []
@@ -296,65 +347,67 @@ class OllamaCommentGenerator:
                 "(не пересказывай его и не отвечай напрямую комментаторам):\n"
                 f"{extra_context.strip()}"
             )
-        user_prompt = (
-            f"/no_think\n"
-            f"Напиши один качественный комментарий в Threads на {language} языке. "
-            "Верни ТОЛЬКО готовый комментарий. Не объясняй, как ты его пишешь, "
-            "не анализируй пост и не используй фразы вроде «мне нужно», «сначала», "
-            "«исходный пост» или «комментарий должен».\n\n"
-            f"Исходный пост:\n{post_text.strip()}{context}"
-        )
-        draft = await self._chat(
-            [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.72,
-        )
+
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": (
+                    f"/no_think\n"
+                    f"Напиши один комментарий в Threads на {language} языке. "
+                    "Поле comment должно содержать только текст, который можно сразу "
+                    "скопировать и опубликовать под постом. Никаких рассуждений о задаче.\n\n"
+                    f"Пост:\n{post_text.strip()}{context}"
+                ),
+            },
+        ]
+        draft = await self._chat_comment(messages, temperature=0.68)
 
         if self._looks_like_meta_output(draft):
-            draft = await self._chat(
+            draft = await self._chat_comment(
                 [
                     {
                         "role": "system",
-                        "content": SYSTEM_PROMPT + (
-                            "\n\nКРИТИЧНО: вывод должен состоять только из текста, "
-                            "который можно сразу вставить в комментарий Threads."
+                        "content": (
+                            "Ты отвечаешь как обычный человек в Threads. "
+                            "Верни только короткую естественную реакцию на пост. "
+                            "Нельзя описывать процесс написания ответа."
                         ),
                     },
                     {
                         "role": "user",
                         "content": (
-                            "/no_think\n"
-                            "Предыдущий ответ был рассуждением, а не комментарием. "
-                            "Сейчас верни только сам готовый комментарий без пояснений.\n\n"
-                            f"Пост:\n{post_text.strip()}{context}"
+                            f"/no_think\nПост:\n{post_text.strip()}{context}\n\n"
+                            "Напиши только сам комментарий."
                         ),
                     },
                 ],
-                temperature=0.55,
+                temperature=0.45,
             )
 
         if self._looks_like_meta_output(draft):
-            raise CommentGenerationError("Ollama returned reasoning instead of a ready comment")
+            raise CommentGenerationError("Ollama still returned meta text instead of a comment")
 
         return self._trim(draft)
 
     async def regenerate(self, post_text: str, previous: str) -> str:
         language = _language_for(post_text)
-        draft = await self._chat(
+        draft = await self._chat_comment(
             [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {
                     "role": "user",
                     "content": (
                         f"/no_think\nПерепиши комментарий на {language} языке проще, короче и естественнее. "
-                        "Не сохраняй формулировки только ради сохранения. Если вопрос слабый, убери его.\n\n"
+                        "Поле comment должно содержать только итоговый комментарий, без анализа. "
+                        "Если вопрос слабый, убери его.\n\n"
                         f"Пост:\n{post_text.strip()}\n\n"
                         f"Предыдущий вариант:\n{previous.strip()}"
                     ),
                 },
             ],
-            temperature=0.9,
+            temperature=0.72,
         )
+        if self._looks_like_meta_output(draft):
+            raise CommentGenerationError("Ollama returned meta text while rewriting the comment")
         return self._trim(draft)
