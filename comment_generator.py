@@ -207,6 +207,22 @@ class OllamaCommentGenerator:
         text = str(payload.get("message", {}).get("content") or "").strip()
         return text or None
 
+    async def available_models(self) -> set[str]:
+        """Вернуть имена моделей, которые сейчас видит локальная Ollama."""
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.get(f"{self.base_url}/api/tags")
+        if response.is_error:
+            raise CommentGenerationError(f"Ollama tags returned HTTP {response.status_code}")
+        payload = response.json()
+        names: set[str] = set()
+        for item in payload.get("models", []):
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or item.get("model") or "").strip()
+            if name:
+                names.add(name)
+        return names
+
     @staticmethod
     def _trim(text: str) -> str:
         text = " ".join(line.strip() for line in text.splitlines() if line.strip())
