@@ -18,6 +18,10 @@ class ThreadPost:
     username: str
     permalink: str
     timestamp: str | None = None
+    media_type: str | None = None
+    media_url: str | None = None
+    alt_text: str | None = None
+    has_replies: bool = False
 
 
 class ThreadsApiError(RuntimeError):
@@ -74,7 +78,7 @@ class ThreadsClient:
                 "q": query,
                 "search_type": "RECENT",
                 "limit": max(1, min(limit, 50)),
-                "fields": "id,text,username,permalink,timestamp",
+                "fields": "id,text,username,permalink,timestamp,media_type,media_url,alt_text,has_replies",
             },
         )
         posts: list[ThreadPost] = []
@@ -92,9 +96,32 @@ class ThreadsClient:
                     username=str(item.get("username") or "").strip(),
                     permalink=str(item.get("permalink") or "").strip(),
                     timestamp=str(item.get("timestamp") or "").strip() or None,
+                    media_type=str(item.get("media_type") or "").strip() or None,
+                    media_url=str(item.get("media_url") or "").strip() or None,
+                    alt_text=str(item.get("alt_text") or "").strip() or None,
+                    has_replies=bool(item.get("has_replies")),
                 )
             )
         return posts
+
+    async def get_replies(self, post_id: str, *, limit: int = 6) -> list[str]:
+        payload = await self._request(
+            "GET",
+            f"/{post_id}/replies",
+            params={
+                "fields": "id,text,timestamp,username",
+                "reverse": "false",
+                "limit": max(1, min(limit, 20)),
+            },
+        )
+        replies: list[str] = []
+        for item in payload.get("data", [])[: max(1, min(limit, 20))]:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("text") or "").strip()
+            if text:
+                replies.append(text)
+        return replies
 
     async def create_text_reply(self, post_id: str, text: str) -> str:
         payload = await self._request(

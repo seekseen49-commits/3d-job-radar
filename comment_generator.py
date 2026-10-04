@@ -176,8 +176,15 @@ class OllamaCommentGenerator:
         choice = int(match.group(1)) - 1
         return choice if 0 <= choice < len(post_texts) else None
 
-    async def generate(self, post_text: str) -> str:
+    async def generate(self, post_text: str, *, extra_context: str | None = None) -> str:
         language = _language_for(post_text)
+        context = ""
+        if extra_context:
+            context = (
+                "\n\nДополнительный контекст для понимания поста "
+                "(не пересказывай его и не отвечай напрямую комментаторам):\n"
+                f"{extra_context.strip()}"
+            )
         draft = await self._chat(
             [
                 {"role": "system", "content": SYSTEM_PROMPT},
@@ -185,7 +192,7 @@ class OllamaCommentGenerator:
                     "role": "user",
                     "content": (
                         f"Напиши один качественный комментарий в Threads на {language} языке.\n\n"
-                        f"Исходный пост:\n{post_text.strip()}"
+                        f"Исходный пост:\n{post_text.strip()}{context}"
                     ),
                 },
             ],

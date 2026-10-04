@@ -19,6 +19,42 @@ from threads_client import ThreadPost, ThreadsClient
 from threads_rules import eligible_post
 
 
+
+CORE_DISCOVERY_QUERIES = (
+    "3D", "Blender", "рендер", "анимация", "фриланс", "заказ",
+    "заказчик", "клиент", "монтаж", "работа", "проект", "портфолио",
+)
+
+EXPANDED_DISCOVERY_QUERIES = (
+    # 3D / CG
+    "blender3d", "blenderrender", "blenderart", "3dart", "3dartist",
+    "3dmodeling", "3d model", "моделирование", "3д моделирование",
+    "визуализация", "сцена", "материалы", "текстуры", "UV", "ретопология",
+    "скульпт", "low poly", "high poly", "hard surface", "prop art",
+    "environment art", "3D Printing", "3dprinting", "3д печать", "STL",
+    "Substance Painter", "ZBrush", "Geometry Nodes", "Cycles", "Eevee",
+    # GameDev
+    "Game Dev", "gamedev", "indie game", "Unreal Engine", "Unity", "Godot",
+    "game artist", "environment artist", "technical artist", "level design",
+    "game ready", "LOD", "collision", "blueprint", "shader", "asset",
+    # Motion / video
+    "motion design", "motiondesign", "After Effects", "aftereffects",
+    "Premiere Pro", "DaVinci Resolve", "видеомонтаж", "моушн", "ролик",
+    "reels", "композ", "compositing",
+    # Freelance / work
+    "биржа", "правки", "дедлайн", "оплата", "ставка", "ценник", "бриф",
+    "ТЗ", "тестовое", "собеседование", "вакансия", "поиск работы",
+    "ищу работу", "ищу заказ", "креативная работа",
+    # Learning / creative process
+    "курс", "туториал", "урок", "обучение", "учусь", "изучаю", "новичок",
+    "первая работа", "первый рендер", "практика", "процесс", "сделал",
+    "сделала", "делаю", "готово", "проба",
+    # AI / creative workflow
+    "нейросети", "нейронка", "AI", "ИИ", "prompt", "генеративный ИИ",
+    # Work-life
+    "выгорание", "мотивация", "дисциплина", "прокрастинация", "творческий кризис",
+)
+
 def _keyboard(post_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -99,44 +135,21 @@ class ThreadsCommentAssistant:
             return 0
 
         async with self._scan_lock:
-            priority = (
-                "3D",
-                "Blender",
-                "blender3d",
-                "blenderrender",
-                "blenderart",
-                "3dart",
-                "3dartist",
-                "3dmodeling",
-                "3d model",
-                "3D Printing",
-                "3dprinting",
-                "Game Dev",
-                "gamedev",
-                "Unreal Engine",
-                "рендер",
-                "3д моделирование",
-                "3д печать",
-                "визуализация",
-                "motion design",
-                "motiondesign",
-                "After Effects",
-                "aftereffects",
-                "монтаж",
-                "видеомонтаж",
-                "фриланс",
-                "фрилансер",
-                "заказчик",
-                "клиент",
-                "портфолио",
-                "нейросети",
-            )
             configured = list(self.settings.threads_comment_queries)
+            expanded = list(EXPANDED_DISCOVERY_QUERIES)
+            rotate_index = int(self.db.get_value("threads_discovery_query_index", "0") or "0")
+            rotate_index %= max(1, len(expanded))
+            rotated = expanded[rotate_index:] + expanded[:rotate_index]
+            self.db.set_value(
+                "threads_discovery_query_index",
+                str((rotate_index + 28) % max(1, len(expanded))),
+            )
+
             queries: list[str] = []
-            for query in (*priority, *configured):
+            for query in (*CORE_DISCOVERY_QUERIES, *configured, *rotated):
                 if query not in queries:
                     queries.append(query)
-                if len(queries) >= 30:
+                if len(queries) >= 40:
                     break
 
             logging.info("Threads comments: scanning queries=%r", queries)
@@ -175,8 +188,34 @@ class ThreadsCommentAssistant:
 
             candidates = sorted(pool.values(), key=self._candidate_score, reverse=True)[:12]
 
+            reply_results = await asyncio.gather(
+                *(
+                    self.client.get_replies(post.id, limit=5)
+                    if post.has_replies
+                    else asyncio.sleep(0, result=[])
+                    for post in candidates
+                ),
+                return_exceptions=True,
+            )
+
+            candidate_contexts: list[str] = []
+            extra_context_by_id: dict[str, str] = {}
+            for post, replies_result in zip(candidates, reply_results):
+                parts = [post.text]
+                extra_parts: list[str] = []
+                if post.alt_text:
+                    extra_parts.append(f"Описание изображения/видео: {post.alt_text}")
+                if not isinstance(replies_result, Exception) and replies_result:
+                    replies = replies_result[:5]
+                    extra_parts.append("Комментарии под постом: " + " | ".join(replies))
+                if extra_parts:
+                    extra = "\n".join(extra_parts)
+                    extra_context_by_id[post.id] = extra
+                    parts.append(extra)
+                candidate_contexts.append("\n".join(parts))
+
             try:
-                choice = await self.generator.choose_best([post.text for post in candidates])
+                choice = await self.generator.choose_best(candidate_contexts)
             except Exception:
                 logging.exception("Threads comments: batch ranking failed")
                 return 0
@@ -186,7 +225,10 @@ class ThreadsCommentAssistant:
                 return 0
 
             post = candidates[choice]
-            draft = await self.generator.generate(post.text)
+            draft = await self.generator.generate(
+                post.text,
+                extra_context=extra_context_by_id.get(post.id),
+            )
             self.db.save_threads_comment_draft(
                 post.id,
                 post.username,
