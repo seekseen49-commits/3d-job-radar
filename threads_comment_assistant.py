@@ -15,6 +15,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from comment_generator import OllamaCommentGenerator
 from config import Settings
 from database import Database
+from threads_browser_client import ThreadsBrowserClient
 from threads_client import ThreadPost, ThreadsClient
 from threads_rules import ineligibility_reason
 
@@ -55,7 +56,17 @@ EXPANDED_DISCOVERY_QUERIES = (
     "выгорание", "мотивация", "дисциплина", "прокрастинация", "творческий кризис",
 )
 
-def _keyboard(post_id: str) -> InlineKeyboardMarkup:
+def _keyboard(post_id: str, *, manual_only: bool = False) -> InlineKeyboardMarkup:
+    if manual_only:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="✅ Ответила", callback_data=f"tc:done:{post_id}"),
+                    InlineKeyboardButton(text="♻️ Переписать", callback_data=f"tc:redo:{post_id}"),
+                ],
+                [InlineKeyboardButton(text="⏭ Пропустить", callback_data=f"tc:skip:{post_id}")],
+            ]
+        )
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -74,12 +85,25 @@ def _short(value: str, limit: int) -> str:
 
 class ThreadsCommentAssistant:
     def __init__(self, settings: Settings, db: Database, bot: Bot) -> None:
-        if not settings.threads_access_token:
-            raise ValueError("THREADS_ACCESS_TOKEN is required for Threads comments")
         self.settings = settings
         self.db = db
         self.bot = bot
-        self.client = ThreadsClient(settings.threads_access_token)
+        self.discovery_mode = getattr(settings, "threads_discovery_mode", "api").strip().lower()
+        self.manual_reply_only = bool(getattr(settings, "threads_manual_reply_only", False))
+
+        token = (settings.threads_access_token or "").strip()
+        if self.discovery_mode == "api" and not token:
+            raise ValueError("THREADS_ACCESS_TOKEN is required when THREADS_DISCOVERY_MODE=api")
+
+        self.client = ThreadsClient(token) if token else None
+        self.browser_client = (
+            ThreadsBrowserClient(
+                getattr(settings, "threads_browser_profile_dir"),
+                headless=bool(getattr(settings, "threads_browser_headless", True)),
+            )
+            if self.discovery_mode == "browser"
+            else None
+        )
         self.generator = OllamaCommentGenerator(
             settings.ollama_base_url,
             settings.ollama_model,
@@ -156,11 +180,26 @@ class ThreadsCommentAssistant:
                 if len(queries) >= 40:
                     break
 
-            logging.info("Threads comments: scanning queries=%r", queries)
-            results = await asyncio.gather(
-                *(self.client.search_recent(query, limit=30, max_age_hours=24) for query in queries),
-                return_exceptions=True,
-            )
+            if self.discovery_mode == "browser":
+                queries = queries[:8]
+
+            logging.info("Threads comments: scanning mode=%s queries=%r", self.discovery_mode, queries)
+            if self.discovery_mode == "browser":
+                if self.browser_client is None:
+                    raise RuntimeError("Browser discovery is not initialized")
+                results = []
+                for query in queries:
+                    try:
+                        results.append(await self.browser_client.search_recent(query, limit=12))
+                    except Exception as exc:
+                        results.append(exc)
+            else:
+                if self.client is None:
+                    raise RuntimeError("Threads API client is not initialized")
+                results = await asyncio.gather(
+                    *(self.client.search_recent(query, limit=30, max_age_hours=24) for query in queries),
+                    return_exceptions=True,
+                )
 
             pool: dict[str, ThreadPost] = {}
             total_returned = 0
@@ -204,7 +243,7 @@ class ThreadsCommentAssistant:
             reply_results = await asyncio.gather(
                 *(
                     self.client.get_replies(post.id, limit=5)
-                    if post.has_replies
+                    if self.client is not None and post.has_replies and not post.id.startswith("web:")
                     else asyncio.sleep(0, result=[])
                     for post in candidates
                 ),
@@ -280,68 +319,54 @@ class ThreadsCommentAssistant:
             await self.bot.send_message(
                 self.settings.owner_chat_id,
                 self.format_card(row),
-                reply_markup=_keyboard(post.id),
+                reply_markup=_keyboard(post.id, manual_only=self.manual_reply_only),
                 disable_web_page_preview=True,
             )
             logging.info("Threads comments: draft created for post=%s", post.id)
             return 1
 
     async def diagnostics(self) -> str:
-        """Безопасная проверка Threads API и локальных Ollama-моделей."""
+        """Безопасная проверка поиска и локальных Ollama-моделей."""
         lines = ["<b>Threads-комментатор: проверка</b>"]
 
-        try:
-            me = await self.client.me()
-            username = str(me.get("username") or "").strip()
-            suffix = f" (@{escape(username)})" if username else ""
-            lines.append(f"✅ Threads API: подключен{suffix}")
-        except Exception as exc:
-            lines.append(f"❌ Threads API: {escape(str(exc))}")
-
-        try:
-            own_username = ""
+        if self.discovery_mode == "browser":
             try:
-                me = await self.client.me()
-                own_username = str(me.get("username") or "").strip().lower()
-            except Exception:
-                pass
-
-            found = []
-            for query in ("3D", "Blender", "design", "work"):
-                posts = await self.client.search_recent(
-                    query,
-                    limit=10,
-                    max_age_hours=24,
-                )
-                found.extend(posts)
+                if self.browser_client is None:
+                    raise RuntimeError("Browser discovery is not initialized")
+                found = await self.browser_client.search_recent("Blender", limit=5)
                 if found:
-                    break
-
-            if found:
-                public_posts = [
-                    post for post in found
-                    if not own_username or post.username.strip().lower() != own_username
-                ]
-                if public_posts:
-                    lines.append(
-                        f"✅ Keyword Search: публичный поиск работает, свежих найдено {len(found)}"
-                    )
+                    lines.append(f"✅ Поиск Threads через браузер: найдено {len(found)} постов")
                 else:
-                    lines.append(
-                        "⚠️ Keyword Search: endpoint работает, но свежие результаты только вашего аккаунта"
-                    )
+                    lines.append("⚠️ Поиск Threads через браузер работает, но по Blender сейчас пусто")
+            except Exception as exc:
+                lines.append(f"❌ Поиск Threads через браузер: {escape(str(exc))}")
+            lines.append("✅ Режим ответа: вручную по готовому тексту")
+        else:
+            if self.client is None:
+                lines.append("❌ Threads API: токен не задан")
             else:
-                lines.append(
-                    "⚠️ Keyword Search: endpoint работает, но за 24 ч свежих результатов не вернул"
-                )
-        except Exception as exc:
-            lines.append(f"❌ Keyword Search: {escape(str(exc))}")
+                try:
+                    me = await self.client.me()
+                    username = str(me.get("username") or "").strip()
+                    suffix = f" (@{escape(username)})" if username else ""
+                    lines.append(f"✅ Threads API: подключен{suffix}")
+                except Exception as exc:
+                    lines.append(f"❌ Threads API: {escape(str(exc))}")
 
-        try:
-            await self.client.get_my_replies(limit=1)
-            lines.append("✅ Чтение replies: доступно")
-        except Exception as exc:
-            lines.append(f"❌ Чтение replies: {escape(str(exc))}")
+                try:
+                    found = await self.client.search_recent("Blender", limit=10, max_age_hours=24)
+                    if found:
+                        lines.append(f"✅ Keyword Search: свежих найдено {len(found)}")
+                    else:
+                        lines.append("⚠️ Keyword Search: за 24 ч результатов не вернул")
+                except Exception as exc:
+                    lines.append(f"❌ Keyword Search: {escape(str(exc))}")
+
+                try:
+                    await self.client.get_my_replies(limit=1)
+                    lines.append("✅ Чтение replies: доступно")
+                except Exception as exc:
+                    lines.append(f"❌ Чтение replies: {escape(str(exc))}")
 
         try:
             models = await self.generator.available_models()
@@ -367,20 +392,22 @@ class ThreadsCommentAssistant:
         except Exception as exc:
             lines.append(f"❌ Ollama: {escape(str(exc))}")
 
-        lines.append(
-            "\nНужные scopes токена: "
-            "<code>threads_basic</code>, "
-            "<code>threads_keyword_search</code>, "
-            "<code>threads_read_replies</code>, "
-            "<code>threads_content_publish</code>, "
-            "<code>threads_manage_replies</code>."
-        )
-        lines.append(
-            "Публикацию специально не тестирую автоматически, чтобы проверка ничего не написала в Threads."
-        )
+        if self.discovery_mode == "browser" and self.manual_reply_only:
+            lines.append(
+                "\nMeta App Review для этого режима не нужен: бот только находит пост, "
+                "готовит черновик и даёт ссылку. Ответ в Threads вы публикуете сами."
+            )
+        else:
+            lines.append(
+                "\nДля API-режима нужны соответствующие Threads permissions из Meta."
+            )
         return "\n".join(lines)
 
     async def publish(self, post_id: str) -> str:
+        if self.manual_reply_only:
+            raise RuntimeError("Автопубликация отключена: ответьте вручную по готовому тексту.")
+        if self.client is None:
+            raise RuntimeError("Threads API client is not configured")
         row = self.db.get_threads_comment_post(post_id)
         if row is None:
             raise ValueError("Черновик не найден")
@@ -407,6 +434,16 @@ class ThreadsCommentAssistant:
         if row is None:
             raise ValueError("Черновик не найден")
         self.db.mark_threads_comment_status(post_id, "skipped")
+
+    def mark_done(self, post_id: str) -> None:
+        row = self.db.get_threads_comment_post(post_id)
+        if row is None:
+            raise ValueError("Черновик не найден")
+        self.db.mark_threads_comment_status(post_id, "sent", "manual")
+
+    async def close(self) -> None:
+        if self.browser_client is not None:
+            await self.browser_client.close()
 
     async def run(self, stop_event: asyncio.Event) -> None:
         interval = max(self.settings.threads_comment_scan_minutes, 15) * 60
@@ -517,6 +554,18 @@ def register_threads_comment_handlers(
                     )
                 return
 
+            if action == "done":
+                assistant.mark_done(post_id)
+                row = assistant.db.get_threads_comment_post(post_id)
+                await callback.answer("Отмечено.")
+                if callback.message and row is not None:
+                    await callback.message.edit_text(
+                        assistant.format_card(row, note="✅ Отмечено как отвечено вручную"),
+                        reply_markup=None,
+                        disable_web_page_preview=True,
+                    )
+                return
+
             if action == "redo":
                 await callback.answer("Переписываю…")
                 await assistant.regenerate(post_id)
@@ -524,7 +573,7 @@ def register_threads_comment_handlers(
                 if callback.message and row is not None:
                     await callback.message.edit_text(
                         assistant.format_card(row),
-                        reply_markup=_keyboard(post_id),
+                        reply_markup=_keyboard(post_id, manual_only=assistant.manual_reply_only),
                         disable_web_page_preview=True,
                     )
                 return
