@@ -13,3 +13,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 threads_browser_profile/
+
+# Local cursor for passive Threads collector
+state/threads_bridge_query_index.txt
+threads_chatgpt_bridge.log
