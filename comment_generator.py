@@ -1,6 +1,7 @@
 """Генерация коротких комментариев локальной моделью Ollama."""
 from __future__ import annotations
 
+import base64
 import re
 
 import httpx
@@ -107,9 +108,17 @@ class CommentGenerationError(RuntimeError):
 
 
 class OllamaCommentGenerator:
-    def __init__(self, base_url: str, model: str, *, timeout: float = 90.0) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        model: str,
+        *,
+        vision_model: str | None = None,
+        timeout: float = 90.0,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model.strip()
+        self.vision_model = (vision_model or "").strip()
         self.timeout = timeout
         if not self.model:
             raise ValueError("OLLAMA_MODEL is required")
@@ -134,6 +143,69 @@ class OllamaCommentGenerator:
         if not text:
             raise CommentGenerationError("Ollama returned an empty comment")
         return text
+
+    async def _download_images(self, urls: tuple[str, ...], *, limit: int = 2) -> list[str]:
+        images: list[str] = []
+        if not urls:
+            return images
+
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            for url in urls[:limit]:
+                try:
+                    response = await client.get(url)
+                    response.raise_for_status()
+                except httpx.HTTPError:
+                    continue
+
+                content_type = response.headers.get("content-type", "").lower()
+                if content_type and not content_type.startswith("image/"):
+                    continue
+                data = response.content
+                if not data or len(data) > 10 * 1024 * 1024:
+                    continue
+                images.append(base64.b64encode(data).decode("ascii"))
+        return images
+
+    async def describe_visuals(self, image_urls: tuple[str, ...]) -> str | None:
+        if not self.vision_model or not image_urls:
+            return None
+
+        images = await self._download_images(image_urls)
+        if not images:
+            return None
+
+        async with httpx.AsyncClient(timeout=max(self.timeout, 120.0)) as client:
+            response = await client.post(
+                f"{self.base_url}/api/chat",
+                json={
+                    "model": self.vision_model,
+                    "stream": False,
+                    "think": False,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": (
+                                "Кратко опиши, что видно на изображениях из поста Threads. "
+                                "Особенно отметь признаки 3D/CG, GameDev, монтажа, motion design, "
+                                "фриланса или рабочего процесса. Не додумывай то, чего не видно. "
+                                "Нужны 1-3 коротких предложения на русском."
+                            ),
+                            "images": images,
+                        }
+                    ],
+                    "options": {"temperature": 0.1},
+                },
+            )
+
+        if response.status_code == 404:
+            return None
+        if response.is_error:
+            raise CommentGenerationError(
+                f"Ollama vision returned HTTP {response.status_code}"
+            )
+        payload = response.json()
+        text = str(payload.get("message", {}).get("content") or "").strip()
+        return text or None
 
     @staticmethod
     def _trim(text: str) -> str:

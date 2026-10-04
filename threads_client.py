@@ -20,8 +20,10 @@ class ThreadPost:
     timestamp: str | None = None
     media_type: str | None = None
     media_url: str | None = None
+    thumbnail_url: str | None = None
     alt_text: str | None = None
     has_replies: bool = False
+    image_urls: tuple[str, ...] = ()
 
 
 class ThreadsApiError(RuntimeError):
@@ -78,7 +80,7 @@ class ThreadsClient:
                 "q": query,
                 "search_type": "RECENT",
                 "limit": max(1, min(limit, 50)),
-                "fields": "id,text,username,permalink,timestamp,media_type,media_url,alt_text,has_replies",
+                "fields": "id,text,username,permalink,timestamp,media_type,media_url,thumbnail_url,alt_text,has_replies,children",
             },
         )
         posts: list[ThreadPost] = []
@@ -89,6 +91,29 @@ class ThreadsClient:
             text = str(item.get("text") or "").strip()
             if not post_id or not text:
                 continue
+            media_type = str(item.get("media_type") or "").strip() or None
+            media_url = str(item.get("media_url") or "").strip() or None
+            thumbnail_url = str(item.get("thumbnail_url") or "").strip() or None
+            image_urls: list[str] = []
+
+            if media_type and "IMAGE" in media_type.upper() and media_url:
+                image_urls.append(media_url)
+            elif thumbnail_url:
+                image_urls.append(thumbnail_url)
+
+            children = item.get("children")
+            if isinstance(children, dict):
+                for child in children.get("data", [])[:3]:
+                    if not isinstance(child, dict):
+                        continue
+                    child_type = str(child.get("media_type") or "").upper()
+                    child_media = str(child.get("media_url") or "").strip()
+                    child_thumb = str(child.get("thumbnail_url") or "").strip()
+                    if "IMAGE" in child_type and child_media:
+                        image_urls.append(child_media)
+                    elif child_thumb:
+                        image_urls.append(child_thumb)
+
             posts.append(
                 ThreadPost(
                     id=post_id,
@@ -96,10 +121,12 @@ class ThreadsClient:
                     username=str(item.get("username") or "").strip(),
                     permalink=str(item.get("permalink") or "").strip(),
                     timestamp=str(item.get("timestamp") or "").strip() or None,
-                    media_type=str(item.get("media_type") or "").strip() or None,
-                    media_url=str(item.get("media_url") or "").strip() or None,
+                    media_type=media_type,
+                    media_url=media_url,
+                    thumbnail_url=thumbnail_url,
                     alt_text=str(item.get("alt_text") or "").strip() or None,
                     has_replies=bool(item.get("has_replies")),
+                    image_urls=tuple(dict.fromkeys(image_urls))[:3],
                 )
             )
         return posts

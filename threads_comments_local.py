@@ -37,6 +37,7 @@ class LocalThreadsSettings:
     threads_comment_own_username: str | None
     ollama_base_url: str
     ollama_model: str
+    ollama_vision_model: str | None
 
 
 def _required(name: str) -> str:
@@ -91,6 +92,7 @@ def load_local_settings() -> LocalThreadsSettings:
         threads_comment_own_username=os.getenv("THREADS_COMMENT_OWN_USERNAME", "").strip().lstrip("@") or None,
         ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").strip().rstrip("/"),
         ollama_model=os.getenv("OLLAMA_MODEL", "qwen3:4b").strip() or "qwen3:4b",
+        ollama_vision_model=os.getenv("OLLAMA_VISION_MODEL", "qwen3-vl:4b").strip() or None,
     )
 
 
@@ -132,8 +134,9 @@ async def run() -> None:
 
     try:
         logging.info(
-            "Локальный Threads-комментатор запущен. Модель=%s, Ollama=%s",
+            "Локальный Threads-комментатор запущен. Модель=%s, vision=%s, Ollama=%s",
             settings.ollama_model,
+            settings.ollama_vision_model or "off",
             settings.ollama_base_url,
         )
         done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
