@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -71,17 +72,29 @@ class ThreadsClient:
     async def me(self) -> dict[str, Any]:
         return await self._request("GET", "/v1.0/me", params={"fields": "id,username"})
 
-    async def search_recent(self, query: str, *, limit: int = 20) -> list[ThreadPost]:
+    async def search_recent(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        max_age_hours: int | None = None,
+    ) -> list[ThreadPost]:
         # Keyword Search в Threads использует отдельный endpoint без /v1.0.
+        params: dict[str, Any] = {
+            "q": query,
+            "search_type": "RECENT",
+            "search_mode": "KEYWORD",
+            "limit": max(1, min(limit, 50)),
+            "fields": "id,text,username,permalink,timestamp,media_type,media_url,thumbnail_url,alt_text,has_replies,children",
+        }
+        if max_age_hours is not None:
+            since = datetime.now(timezone.utc) - timedelta(hours=max(1, max_age_hours))
+            params["since"] = since.isoformat(timespec="seconds")
+
         payload = await self._request(
             "GET",
             "/keyword_search",
-            params={
-                "q": query,
-                "search_type": "RECENT",
-                "limit": max(1, min(limit, 50)),
-                "fields": "id,text,username,permalink,timestamp,media_type,media_url,thumbnail_url,alt_text,has_replies,children",
-            },
+            params=params,
         )
         posts: list[ThreadPost] = []
         for item in payload.get("data", [])[: max(1, min(limit, 50))]:
