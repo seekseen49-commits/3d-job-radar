@@ -84,6 +84,20 @@ NO если:
 """
 
 
+RANK_PROMPT = f"""Выбери ОДИН пост, под которым этому аккаунту естественно оставить хороший комментарий.
+
+{INTEREST_PROFILE}
+
+Приоритет:
+- пост реально цепляет тему аккаунта;
+- есть конкретная деталь, к которой можно привязать мысль;
+- можно добавить опытный/любопытный угол, а не просто похвалить;
+- живые посты обычных людей лучше рекламы, вакансий и продаж.
+
+Верни только номер поста. Если все варианты слабые, верни NONE.
+"""
+
+
 def _language_for(text: str) -> str:
     return "русском" if CYRILLIC_RE.search(text) else "английском"
 
@@ -137,6 +151,30 @@ class OllamaCommentGenerator:
             temperature=0.05,
         )
         return result.strip().upper().startswith("YES")
+
+    async def choose_best(self, post_texts: list[str]) -> int | None:
+        if not post_texts:
+            return None
+        numbered = []
+        for index, text in enumerate(post_texts, start=1):
+            compact = " ".join(text.split())
+            if len(compact) > 520:
+                compact = compact[:517].rstrip() + "..."
+            numbered.append(f"{index}. {compact}")
+        result = await self._chat(
+            [
+                {"role": "system", "content": RANK_PROMPT},
+                {"role": "user", "content": "\n\n".join(numbered)},
+            ],
+            temperature=0.1,
+        )
+        if result.strip().upper().startswith("NONE"):
+            return None
+        match = re.search(r"\b(\d{1,2})\b", result)
+        if not match:
+            return None
+        choice = int(match.group(1)) - 1
+        return choice if 0 <= choice < len(post_texts) else None
 
     async def generate(self, post_text: str) -> str:
         language = _language_for(post_text)
