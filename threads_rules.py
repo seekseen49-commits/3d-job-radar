@@ -18,6 +18,17 @@ RISK_RE = re.compile(
 )
 
 
+CREATIVE_DOMAIN_RE = re.compile(
+    r"(\b3d\b|3д|blender|рендер|render|визуализ|моделир|model(?:ing)?|"
+    r"stl|fbx|obj|gltf|glb|unreal|unity|gamedev|game\s*dev|game\s*artist|"
+    r"after\s*effects|premiere|davinci|видеомонтаж|монтаж[её]р|монтаж|видеограф|"
+    r"motion\s*design|motiondesign|моушн|cg\b|cgi\b|дизайн|дизайнер|designer|"
+    r"figma|photoshop|illustrator|canva|портфолио|portfolio|"
+    r"нейросет|генеративн(?:ый|ого)\s*ии|creative\s*work|креативн(?:ая|ый)\s*работ)",
+    re.I,
+)
+
+
 def _is_fresh(timestamp: str | None, *, max_age_hours: int = 24) -> bool:
     if not timestamp:
         return False
@@ -47,6 +58,10 @@ def ineligibility_reason(
         return "not_fresh"
     if own_username and post.username.lower() == own_username.strip().lstrip("@").lower():
         return "own_post"
+    # Жёсткий тематический шлюз: пост должен содержать явный признак наших сфер.
+    # Слова "работа", "клиент", "заказ" без 3D/дизайна/монтажа/GameDev больше не проходят.
+    if not CREATIVE_DOMAIN_RE.search(text):
+        return "outside_domain"
     if URL_RE.search(text) and len(text) < 120:
         return "short_with_url"
     if PROMO_RE.search(text):
