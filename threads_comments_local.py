@@ -39,6 +39,7 @@ class LocalThreadsSettings:
     threads_manual_reply_only: bool
     threads_browser_profile_dir: Path
     threads_browser_headless: bool
+    threads_browser_channel: str
     ollama_base_url: str
     ollama_model: str
     ollama_vision_model: str | None
@@ -97,7 +98,8 @@ def load_local_settings() -> LocalThreadsSettings:
         threads_discovery_mode=os.getenv("THREADS_DISCOVERY_MODE", "browser").strip().lower() or "browser",
         threads_manual_reply_only=_bool("THREADS_MANUAL_REPLY_ONLY", True),
         threads_browser_profile_dir=BASE_DIR / (os.getenv("THREADS_BROWSER_PROFILE_DIR", "threads_browser_profile").strip() or "threads_browser_profile"),
-        threads_browser_headless=_bool("THREADS_BROWSER_HEADLESS", True),
+        threads_browser_headless=_bool("THREADS_BROWSER_HEADLESS", False),
+        threads_browser_channel=os.getenv("THREADS_BROWSER_CHANNEL", "msedge").strip() or "msedge",
         ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").strip().rstrip("/"),
         ollama_model=os.getenv("OLLAMA_MODEL", "qwen3:4b").strip() or "qwen3:4b",
         ollama_vision_model=os.getenv("OLLAMA_VISION_MODEL", "qwen3-vl:4b").strip() or None,
