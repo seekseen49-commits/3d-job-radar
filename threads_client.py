@@ -73,6 +73,7 @@ class ThreadsClient:
             params={
                 "q": query,
                 "search_type": "RECENT",
+                "limit": max(1, min(limit, 50)),
                 "fields": "id,text,username,permalink,timestamp",
             },
         )

@@ -49,15 +49,15 @@ def test_accepts_organic_learning_discussion() -> None:
     )
 
 
-def test_skips_posts_older_than_ten_hours() -> None:
+def test_skips_posts_older_than_twenty_four_hours() -> None:
     assert not eligible_post(
-        post("Весь день собирал сцену в Blender и наконец дошел до нормального света.", hours_ago=10.5)
+        post("Весь день собирал сцену в Blender и наконец дошел до нормального света.", hours_ago=24.5)
     )
 
 
-def test_accepts_posts_younger_than_ten_hours() -> None:
+def test_accepts_posts_younger_than_twenty_four_hours() -> None:
     assert eligible_post(
-        post("Весь день собирал сцену в Blender и наконец дошел до нормального света.", hours_ago=9.5)
+        post("Весь день собирал сцену в Blender и наконец дошел до нормального света.", hours_ago=23.5)
     )
 
 
