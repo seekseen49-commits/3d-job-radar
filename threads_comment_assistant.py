@@ -257,43 +257,49 @@ class ThreadsCommentAssistant:
 
             ranked_pool = sorted(pool.values(), key=self._candidate_score, reverse=True)
             russian_pool = [post for post in ranked_pool if re.search(r"[А-Яа-яЁё]", post.text)]
-            # Русские посты приоритетны. Английские используем только как fallback,
-            # если среди свежих кандидатов вообще нет русскоязычных.
-            candidates = (russian_pool or ranked_pool)[:10]
-            logging.info(
-                "Threads comments: language preference russian=%s, candidates=%s",
-                len(russian_pool),
-                len(candidates),
-            )
+            fallback_pool = [post for post in ranked_pool if post not in russian_pool]
 
-            # Сначала отдельным смысловым фильтром убираем посты из чужих сфер
-            # (например, флористику, еду, магазины), даже если там есть слова
-            # "заказ", "клиент" или "работа".
-            candidate_contexts = [
-                "\n".join(
-                    part
-                    for part in (
-                        post.text,
-                        f"Alt-текст медиа: {post.alt_text}" if post.alt_text else "",
+            async def keep_relevant(batch: list[ThreadPost]) -> tuple[list[ThreadPost], list[str]]:
+                batch = batch[:10]
+                contexts = [
+                    "\n".join(
+                        part
+                        for part in (
+                            post.text,
+                            f"Alt-текст медиа: {post.alt_text}" if post.alt_text else "",
+                        )
+                        if part
                     )
-                    if part
+                    for post in batch
+                ]
+                if not batch:
+                    return [], []
+                logging.info("Threads comments: relevance-filtering %s candidates", len(batch))
+                indexes = await self.generator.filter_relevant(contexts)
+                return (
+                    [batch[index] for index in indexes],
+                    [contexts[index] for index in indexes],
                 )
-                for post in candidates
-            ]
 
-            logging.info("Threads comments: relevance-filtering %s candidates", len(candidates))
+            # Сначала проверяем русскоязычные посты. Если среди них ничего реально
+            # подходящего нет, только тогда делаем второй проход по английским.
             try:
-                relevant_indexes = await self.generator.filter_relevant(candidate_contexts)
+                candidates, candidate_contexts = await keep_relevant(russian_pool)
+                if not candidates:
+                    candidates, candidate_contexts = await keep_relevant(fallback_pool)
             except Exception:
                 logging.exception("Threads comments: relevance filtering failed")
                 return 0
 
-            if not relevant_indexes:
+            logging.info(
+                "Threads comments: language preference russian=%s, relevant=%s",
+                len(russian_pool),
+                len(candidates),
+            )
+
+            if not candidates:
                 logging.info("Threads comments: no candidates matched the account interests")
                 return 0
-
-            candidates = [candidates[index] for index in relevant_indexes]
-            candidate_contexts = [candidate_contexts[index] for index in relevant_indexes]
 
             logging.info("Threads comments: ranking %s relevant candidates by text", len(candidates))
             try:
