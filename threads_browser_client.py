@@ -177,7 +177,18 @@ class ThreadsBrowserClient:
             lines = [line.strip() for line in text.splitlines() if line.strip()]
             if lines and username and lines[0].lstrip("@").lower() == username.lower():
                 lines = lines[1:]
-            cleaned = "\n".join(lines).strip()
+
+            # Убираем интерфейсный мусор Threads: "49 мин.", "2", счетчики и т.п.
+            cleaned_lines: list[str] = []
+            for line in lines:
+                low = line.lower()
+                if re.fullmatch(r"\d+\s*(?:мин\.?|ч\.?|дн\.?|день|дня|дней|m|h|d)", low):
+                    continue
+                if re.fullmatch(r"\d{1,4}", line):
+                    continue
+                cleaned_lines.append(line)
+
+            cleaned = "\n".join(cleaned_lines).strip()
             if not cleaned:
                 continue
 
