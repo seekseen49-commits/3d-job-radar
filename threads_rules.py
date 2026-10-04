@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timedelta, timezone
 
 from threads_client import ThreadPost
 
@@ -17,9 +18,29 @@ RISK_RE = re.compile(
 )
 
 
-def eligible_post(post: ThreadPost, *, own_username: str | None = None) -> bool:
+def _is_fresh(timestamp: str | None, *, max_age_hours: int = 10) -> bool:
+    if not timestamp:
+        return False
+    try:
+        published = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if published.tzinfo is None:
+        published = published.replace(tzinfo=timezone.utc)
+    age = datetime.now(timezone.utc) - published.astimezone(timezone.utc)
+    return -timedelta(minutes=5) <= age <= timedelta(hours=max_age_hours)
+
+
+def eligible_post(
+    post: ThreadPost,
+    *,
+    own_username: str | None = None,
+    max_age_hours: int = 10,
+) -> bool:
     text = post.text.strip()
     if len(text) < 25:
+        return False
+    if not _is_fresh(post.timestamp, max_age_hours=max_age_hours):
         return False
     if own_username and post.username.lower() == own_username.strip().lstrip("@").lower():
         return False

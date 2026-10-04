@@ -1,9 +1,21 @@
+from datetime import datetime, timedelta, timezone
+
 from threads_client import ThreadPost
 from threads_rules import eligible_post
 
 
-def post(text: str, username: str = "artist") -> ThreadPost:
-    return ThreadPost(id="1", text=text, username=username, permalink="https://threads.net/x")
+def iso_hours_ago(hours: float) -> str:
+    return (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+
+
+def post(text: str, username: str = "artist", *, hours_ago: float = 1) -> ThreadPost:
+    return ThreadPost(
+        id="1",
+        text=text,
+        username=username,
+        permalink="https://threads.net/x",
+        timestamp=iso_hours_ago(hours_ago),
+    )
 
 
 def test_skips_too_short_posts() -> None:
@@ -35,3 +47,26 @@ def test_accepts_organic_learning_discussion() -> None:
     assert eligible_post(
         post("Закончила курс по Blender и наконец поняла, почему раньше так странно ставила свет в Eevee.")
     )
+
+
+def test_skips_posts_older_than_ten_hours() -> None:
+    assert not eligible_post(
+        post("Весь день собирал сцену в Blender и наконец дошел до нормального света.", hours_ago=10.5)
+    )
+
+
+def test_accepts_posts_younger_than_ten_hours() -> None:
+    assert eligible_post(
+        post("Весь день собирал сцену в Blender и наконец дошел до нормального света.", hours_ago=9.5)
+    )
+
+
+def test_skips_post_without_timestamp() -> None:
+    candidate = ThreadPost(
+        id="2",
+        text="Нормальный пост про Blender, но без времени публикации.",
+        username="artist",
+        permalink="https://threads.net/x",
+        timestamp=None,
+    )
+    assert not eligible_post(candidate)

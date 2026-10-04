@@ -89,74 +89,63 @@ class ThreadsCommentAssistant:
 
         async with self._scan_lock:
             queries_to_try = min(6, len(self.settings.threads_comment_queries))
+            pool: dict[str, ThreadPost] = {}
 
             for _ in range(queries_to_try):
                 query = self._next_query()
                 logging.info("Threads comments: search query=%r", query)
-
                 posts = await self.client.search_recent(query, limit=30)
-                candidates = [
-                    post
-                    for post in posts
-                    if not self.db.has_threads_comment_post(post.id)
-                    and eligible_post(post, own_username=self.settings.threads_comment_own_username)
-                ]
-                candidates.sort(key=self._candidate_score, reverse=True)
-
-                if not candidates:
-                    logging.info("Threads comments: no new candidates for query=%r", query)
-                    continue
-
-                post: ThreadPost | None = None
-                for candidate in candidates[:5]:
-                    try:
-                        if await self.generator.is_relevant(candidate.text):
-                            post = candidate
-                            break
-                    except Exception:
-                        logging.exception(
-                            "Threads comments: relevance check failed for post=%s",
-                            candidate.id,
-                        )
+                for post in posts:
+                    if self.db.has_threads_comment_post(post.id):
                         continue
+                    if not eligible_post(
+                        post,
+                        own_username=self.settings.threads_comment_own_username,
+                        max_age_hours=10,
+                    ):
+                        continue
+                    pool[post.id] = post
 
-                if post is None:
-                    logging.info(
-                        "Threads comments: Ollama rejected all candidates for query=%r",
-                        query,
-                    )
-                    continue
-
-                draft = await self.generator.generate(post.text)
-                self.db.save_threads_comment_draft(
-                    post.id,
-                    post.username,
-                    post.text,
-                    post.permalink,
-                    draft,
-                )
-                row = self.db.get_threads_comment_post(post.id)
-                if row is None:
-                    raise RuntimeError("Threads draft disappeared after save")
-
-                await self.bot.send_message(
-                    self.settings.owner_chat_id,
-                    self.format_card(row),
-                    reply_markup=_keyboard(post.id),
-                    disable_web_page_preview=True,
-                )
+            if not pool:
                 logging.info(
-                    "Threads comments: draft created for post=%s query=%r",
-                    post.id,
-                    query,
+                    "Threads comments: no fresh candidates after %s queries",
+                    queries_to_try,
                 )
-                return 1
+                return 0
 
-            logging.info(
-                "Threads comments: no suitable post found after %s queries",
-                queries_to_try,
+            candidates = sorted(pool.values(), key=self._candidate_score, reverse=True)[:12]
+
+            try:
+                choice = await self.generator.choose_best([post.text for post in candidates])
+            except Exception:
+                logging.exception("Threads comments: batch ranking failed")
+                return 0
+
+            if choice is None:
+                logging.info("Threads comments: Ollama rejected candidate pool")
+                return 0
+
+            post = candidates[choice]
+            draft = await self.generator.generate(post.text)
+            self.db.save_threads_comment_draft(
+                post.id,
+                post.username,
+                post.text,
+                post.permalink,
+                draft,
             )
-            return 0
+            row = self.db.get_threads_comment_post(post.id)
+            if row is None:
+                raise RuntimeError("Threads draft disappeared after save")
+
+            await self.bot.send_message(
+                self.settings.owner_chat_id,
+                self.format_card(row),
+                reply_markup=_keyboard(post.id),
+                disable_web_page_preview=True,
+            )
+            logging.info("Threads comments: draft created for post=%s", post.id)
+            return 1
 
     async def publish(self, post_id: str) -> str:
         row = self.db.get_threads_comment_post(post_id)
@@ -188,17 +177,21 @@ class ThreadsCommentAssistant:
 
     async def run(self, stop_event: asyncio.Event) -> None:
         interval = max(self.settings.threads_comment_scan_minutes, 15) * 60
+        # Не запускаем тяжелый поиск сразу при старте. Сначала бот готов принять
+        # /threads_scan, а автоматическая проверка начнется после интервала.
         while not stop_event.is_set():
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=interval)
+                break
+            except asyncio.TimeoutError:
+                pass
+
             try:
                 await self.scan_once()
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logging.exception("Threads comment scan failed")
-            try:
-                await asyncio.wait_for(stop_event.wait(), timeout=interval)
-            except asyncio.TimeoutError:
-                pass
 
 
 def register_threads_comment_handlers(
