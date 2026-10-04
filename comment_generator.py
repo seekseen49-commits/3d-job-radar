@@ -49,6 +49,8 @@ SYSTEM_PROMPT = f"""Ты пишешь комментарии от лица кр�
 - Не заканчивай каждый комментарий вопросом.
 - Не используй канцелярские и нейросеточные фразы вроде "это уже серьезный старт", "как обычно в таких случаях", "интересный кейс", "как вы думаете".
 - Не выдумывай личный опыт, факты, причинно-следственные связи или детали рабочего процесса, которых нет в посте.
+- Никогда не пиши "я видел/видела", "у меня было", "вчера/недавно заметил(а)", "я пробовал(а)" и другие личные истории, если их нет в переданном контексте.
+- Не добавляй новые числа, сроки, размеры, проценты, цены или технические результаты, которых нет в посте/контексте.
 - Если пост короткий и задан вопросом, ответь прямо на вопрос одной короткой мыслью. Не сочиняй историю вокруг него.
 - Не спорь агрессивно.
 - До 360 символов.
@@ -313,6 +315,46 @@ class OllamaCommentGenerator:
         return bool(META_OUTPUT_RE.search(compact[:500]))
 
     @staticmethod
+    def _grounding_violations(source_text: str, comment: str) -> list[str]:
+        """Поймать самые опасные выдумки маленькой локальной модели."""
+        source = " ".join(source_text.lower().split())
+        text = " ".join(comment.lower().split())
+        violations: list[str] = []
+
+        personal_patterns = (
+            r"\bя\s+(?:видел|видела|слышал|слышала|пробовал|пробовала|печатал|печатала|"
+            r"использовал|использовала|покупал|покупала|тестировал|тестировала|"
+            r"заметил|заметила|сталкивался|сталкивалась|заказывал|заказывала|"
+            r"делал|делала|работал|работала|получил|получила|проверял|проверяла)\b",
+            r"\bмы\s+(?:видели|пробовали|печатали|использовали|тестировали|"
+            r"сталкивались|делали|работали|проверяли)\b",
+            r"\bу меня\b",
+            r"\bу нас\b",
+        )
+        for pattern in personal_patterns:
+            match = re.search(pattern, text, flags=re.I)
+            if match and match.group(0).lower() not in source:
+                violations.append("выдуманный личный опыт")
+                break
+
+        temporal_markers = ("вчера", "позавчера", "на днях", "недавно", "сегодня утром", "только что")
+        for marker in temporal_markers:
+            if marker in text and marker not in source:
+                violations.append(f"выдуманное время: {marker}")
+                break
+
+        number_re = re.compile(r"(?<![A-Za-zА-Яа-яЁё])\d+(?:[.,]\d+)?(?:\s*(?:%|₽|руб\.?|\$|€|мм|см|м))?")
+        source_numbers = {m.group(0).replace(" ", "") for m in number_re.finditer(source)}
+        for match in number_re.finditer(text):
+            value = match.group(0).replace(" ", "")
+            # 3d/3д handled as word context, but a naked new technical number is not allowed.
+            if value not in source_numbers:
+                violations.append(f"новое число/значение: {match.group(0)}")
+                break
+
+        return violations
+
+    @staticmethod
     def _trim(text: str) -> str:
         text = " ".join(line.strip() for line in text.splitlines() if line.strip())
         if len(text) > 360:
@@ -428,54 +470,74 @@ class OllamaCommentGenerator:
                 f"{extra_context.strip()}"
             )
 
-        is_short_question = len(post_text.strip()) <= 220 and "?" in post_text
+        source_text = f"{post_text.strip()}\n{extra_context or ''}".strip()
+        is_short_question = len(post_text.strip()) <= 260 and "?" in post_text
         short_rule = (
-            " Это короткий вопрос: ответь прямо, максимум 1-2 коротких предложения, "
-            "без метафор, выдуманных ситуаций и объяснений за автора."
+            " Это вопрос: ответь прямо и осторожно, максимум 1-2 коротких предложения. "
+            "Можно предложить проверить/попробовать, но нельзя притворяться, что у тебя был такой опыт."
             if is_short_question
             else ""
         )
 
+        base_user = (
+            f"/no_think\n"
+            f"Напиши один комментарий в Threads на {language} языке. "
+            "Поле comment должно содержать только текст, который можно сразу скопировать и опубликовать. "
+            "Используй только факты из поста и дополнительного контекста. "
+            "Не придумывай личный опыт, события, числа или технические результаты."
+            f"{short_rule}\n\n"
+            f"Пост:\n{post_text.strip()}{context}"
+        )
+
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": (
-                    f"/no_think\n"
-                    f"Напиши один комментарий в Threads на {language} языке. "
-                    "Поле comment должно содержать только текст, который можно сразу "
-                    "скопировать и опубликовать под постом. Никаких рассуждений о задаче."
-                    f"{short_rule}\n\n"
-                    f"Пост:\n{post_text.strip()}{context}"
-                ),
-            },
+            {"role": "user", "content": base_user},
         ]
-        draft = await self._chat_comment(messages, temperature=0.68)
 
-        if self._looks_like_meta_output(draft):
+        draft = await self._chat_comment(messages, temperature=0.42)
+        violations = self._grounding_violations(source_text, draft)
+
+        if self._looks_like_meta_output(draft) or violations:
+            reason = "; ".join(violations) if violations else "ответ содержит рассуждение о задаче"
             draft = await self._chat_comment(
                 [
                     {
                         "role": "system",
                         "content": (
-                            "Ты отвечаешь как обычный человек в Threads. "
-                            "Верни только короткую естественную реакцию на пост. "
-                            "Нельзя описывать процесс написания ответа."
+                            SYSTEM_PROMPT
+                            + "\n\nКРИТИЧНО: не добавляй ни одного факта, числа или личного опыта, "
+                            "которого нет в посте. Лучше осторожная реакция или вопрос, чем выдумка."
                         ),
                     },
                     {
                         "role": "user",
                         "content": (
-                            f"/no_think\nПост:\n{post_text.strip()}{context}\n\n"
-                            "Напиши только сам комментарий."
+                            f"/no_think\nПредыдущий вариант отклонён: {reason}. "
+                            "Напиши заново только готовый комментарий. "
+                            "Разрешены только факты из текста ниже.\n\n"
+                            f"Пост:\n{post_text.strip()}{context}"
                         ),
                     },
                 ],
-                temperature=0.45,
+                temperature=0.28,
             )
+            violations = self._grounding_violations(source_text, draft)
 
-        if self._looks_like_meta_output(draft):
-            raise CommentGenerationError("Ollama still returned meta text instead of a comment")
+        if self._looks_like_meta_output(draft) or violations:
+            # Последний безопасный вариант: не сочиняем опыт, а реагируем на сам вопрос.
+            if is_short_question:
+                draft = (
+                    "я бы попробовала на небольшой тестовой модели и сравнила результат. "
+                    "если всё стабильно, уже тогда переходила бы на большие печати)"
+                    if language == "русском"
+                    else
+                    "i'd test it on one small model first and compare the result. "
+                    "if it's stable, then i'd move on to bigger prints)"
+                )
+            else:
+                raise CommentGenerationError(
+                    "Ollama could not produce a grounded comment without invented details"
+                )
 
         draft = self._trim(draft)
         if is_short_question and len(draft) > 220:
