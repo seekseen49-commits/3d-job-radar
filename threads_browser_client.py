@@ -104,17 +104,16 @@ class ThreadsBrowserClient:
         )
         try:
             await page.goto(search_url, wait_until="domcontentloaded")
-            await page.wait_for_timeout(1800)
+            await page.wait_for_timeout(900)
             await self._assert_logged_in(page)
         except ThreadsBrowserLoginRequired:
             raise
         except Exception as exc:
             raise ThreadsBrowserError(f"Не удалось открыть поиск Threads: {exc}") from exc
 
-        # Небольшая прокрутка помогает Threads дорисовать несколько карточек.
-        for _ in range(2):
-            await page.mouse.wheel(0, 1300)
-            await page.wait_for_timeout(600)
+        # Одной короткой прокрутки достаточно для первой пачки результатов.
+        await page.mouse.wheel(0, 1100)
+        await page.wait_for_timeout(350)
 
         raw_items = await page.evaluate(
             """(maxItems) => {
@@ -180,8 +179,19 @@ class ThreadsBrowserClient:
 
             # Убираем интерфейсный мусор Threads: "49 мин.", "2", счетчики и т.п.
             cleaned_lines: list[str] = []
+            ui_noise = {
+                "перевести",
+                "translate",
+                "подробнее",
+                "see more",
+                "/",
+                "к сожалению, воспроизвести это видео не удается.",
+                "sorry, we're having trouble playing this video.",
+            }
             for line in lines:
                 low = line.lower()
+                if low in ui_noise:
+                    continue
                 if re.fullmatch(r"\d+\s*(?:мин\.?|ч\.?|дн\.?|день|дня|дней|m|h|d)", low):
                     continue
                 if re.fullmatch(r"\d{1,4}", line):
