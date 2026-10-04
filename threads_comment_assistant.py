@@ -74,7 +74,7 @@ class ThreadsCommentAssistant:
                 if published.tzinfo is None:
                     published = published.replace(tzinfo=timezone.utc)
                 age_hours = (datetime.now(timezone.utc) - published.astimezone(timezone.utc)).total_seconds() / 3600
-                freshness = max(0, int(10 - age_hours))
+                freshness = max(0, int(24 - age_hours))
             except ValueError:
                 freshness = 0
         return cyrillic, freshness, preferred_length, -abs(length - 300)
@@ -102,19 +102,41 @@ class ThreadsCommentAssistant:
             priority = (
                 "3D",
                 "Blender",
-                "фриланс",
-                "клиент",
-                "заказчик",
-                "монтаж",
-                "After Effects",
+                "blender3d",
+                "blenderrender",
+                "blenderart",
+                "3dart",
+                "3dartist",
+                "3dmodeling",
+                "3d model",
+                "3D Printing",
+                "3dprinting",
+                "Game Dev",
+                "gamedev",
                 "Unreal Engine",
+                "рендер",
+                "3д моделирование",
+                "3д печать",
+                "визуализация",
+                "motion design",
+                "motiondesign",
+                "After Effects",
+                "aftereffects",
+                "монтаж",
+                "видеомонтаж",
+                "фриланс",
+                "фрилансер",
+                "заказчик",
+                "клиент",
+                "портфолио",
+                "нейросети",
             )
             configured = list(self.settings.threads_comment_queries)
             queries: list[str] = []
             for query in (*priority, *configured):
                 if query not in queries:
                     queries.append(query)
-                if len(queries) >= 10:
+                if len(queries) >= 30:
                     break
 
             logging.info("Threads comments: scanning queries=%r", queries)
@@ -136,7 +158,7 @@ class ThreadsCommentAssistant:
                     if not eligible_post(
                         post,
                         own_username=self.settings.threads_comment_own_username,
-                        max_age_hours=10,
+                        max_age_hours=24,
                     ):
                         continue
                     pool[post.id] = post
