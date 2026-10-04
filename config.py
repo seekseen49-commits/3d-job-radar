@@ -45,6 +45,7 @@ class Settings:
     threads_comment_own_username: str | None
     ollama_base_url: str
     ollama_model: str
+    ollama_vision_model: str | None
 
 
 def _required(name: str) -> str:
@@ -114,4 +115,5 @@ def load_settings() -> Settings:
         threads_comment_own_username=os.getenv("THREADS_COMMENT_OWN_USERNAME", "").strip().lstrip("@") or None,
         ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").strip().rstrip("/"),
         ollama_model=os.getenv("OLLAMA_MODEL", "qwen3:4b").strip() or "qwen3:4b",
+        ollama_vision_model=os.getenv("OLLAMA_VISION_MODEL", "qwen3-vl:4b").strip() or None,
     )
