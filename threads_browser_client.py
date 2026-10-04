@@ -134,6 +134,10 @@ class ThreadsBrowserClient:
                     const timeEl = container.querySelector("time");
                     const timestamp = timeEl ? (timeEl.getAttribute("datetime") || "") : "";
                     const images = Array.from(container.querySelectorAll("img"))
+                        .filter(img => {
+                            const rect = img.getBoundingClientRect();
+                            return rect.width >= 120 && rect.height >= 80;
+                        })
                         .map(img => img.currentSrc || img.src || "")
                         .filter(src => src && !src.startsWith("data:"))
                         .filter((src, index, arr) => arr.indexOf(src) === index)
