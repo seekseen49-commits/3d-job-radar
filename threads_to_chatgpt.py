@@ -82,14 +82,12 @@ def _ensure_git_identity() -> None:
         _run_git("config", "user.email", "threads-bridge@local", check=False)
 
 
-def _sync_from_remote() -> None:
-    _ensure_git_identity()
-    result = _run_git("pull", "--rebase", check=False)
-    if result.returncode != 0:
-        logging.warning("git pull --rebase failed: %s", (result.stderr or result.stdout).strip())
+def _commit_pending_queue() -> bool:
+    """Commit any previously staged/pending bridge files before pulling.
 
-
-def _push_inbox() -> bool:
+    This recovers cleanly from an earlier commit failure (for example missing
+    git user.name/user.email) without asking the user to clean the index by hand.
+    """
     _run_git("add", "state/threads_inbox", "state/threads_collector_seen.json", check=False)
     diff = _run_git("diff", "--cached", "--quiet", check=False)
     if diff.returncode == 0:
@@ -98,7 +96,32 @@ def _push_inbox() -> bool:
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     commit = _run_git("commit", "-m", f"Queue Threads candidates {stamp}", check=False)
     if commit.returncode != 0:
-        logging.warning("git commit failed: %s", (commit.stderr or commit.stdout).strip())
+        logging.warning("git commit recovery failed: %s", (commit.stderr or commit.stdout).strip())
+        return False
+    return True
+
+
+def _sync_from_remote() -> None:
+    _ensure_git_identity()
+    _commit_pending_queue()
+    result = _run_git("pull", "--rebase", check=False)
+    if result.returncode != 0:
+        logging.warning("git pull --rebase failed: %s", (result.stderr or result.stdout).strip())
+
+
+def _push_inbox() -> bool:
+    _run_git("add", "state/threads_inbox", "state/threads_collector_seen.json", check=False)
+    diff = _run_git("diff", "--cached", "--quiet", check=False)
+    if diff.returncode != 0:
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        commit = _run_git("commit", "-m", f"Queue Threads candidates {stamp}", check=False)
+        if commit.returncode != 0:
+            logging.warning("git commit failed: %s", (commit.stderr or commit.stdout).strip())
+            return False
+
+    # There may already be a recovered local commit from _sync_from_remote().
+    ahead = _run_git("rev-list", "--count", "@{u}..HEAD", check=False)
+    if ahead.returncode == 0 and ahead.stdout.strip() == "0":
         return False
 
     push = _run_git("push", check=False)
