@@ -150,6 +150,21 @@ class ThreadsClient:
                 replies.append(text)
         return replies
 
+    async def get_my_replies(self, *, limit: int = 1) -> list[dict[str, Any]]:
+        """Проверить доступ к replies текущего Threads-пользователя."""
+        payload = await self._request(
+            "GET",
+            "/me/replies",
+            params={
+                "fields": "id,text,timestamp,username",
+                "limit": max(1, min(limit, 20)),
+            },
+        )
+        data = payload.get("data", [])
+        if not isinstance(data, list):
+            return []
+        return [item for item in data if isinstance(item, dict)]
+
     async def create_text_reply(self, post_id: str, text: str) -> str:
         payload = await self._request(
             "POST",
