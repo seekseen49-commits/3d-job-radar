@@ -18,7 +18,7 @@ RISK_RE = re.compile(
 )
 
 
-def _is_fresh(timestamp: str | None, *, max_age_hours: int = 10) -> bool:
+def _is_fresh(timestamp: str | None, *, max_age_hours: int = 24) -> bool:
     if not timestamp:
         return False
     try:
@@ -35,7 +35,7 @@ def eligible_post(
     post: ThreadPost,
     *,
     own_username: str | None = None,
-    max_age_hours: int = 10,
+    max_age_hours: int = 24,
 ) -> bool:
     text = post.text.strip()
     if len(text) < 25:
