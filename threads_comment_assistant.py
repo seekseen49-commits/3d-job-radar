@@ -22,8 +22,14 @@ from threads_rules import ineligibility_reason
 
 
 CORE_DISCOVERY_QUERIES = (
-    "3D", "Blender", "рендер", "видеомонтаж",
-    "motion design", "Unreal Engine", "фриланс дизайнер", "нейросети дизайнер",
+    "3д моделирование",
+    "Blender",
+    "рендер",
+    "видеомонтаж",
+    "motion design",
+    "Unreal Engine",
+    "фриланс дизайнер",
+    "нейросети дизайнер",
 )
 
 EXPANDED_DISCOVERY_QUERIES = (
@@ -182,7 +188,17 @@ class ThreadsCommentAssistant:
                     break
 
             if self.discovery_mode == "browser":
-                queries = queries[:8]
+                # Браузерный поиск заметно дороже API. Берём 4 запроса за проход
+                # и ротируем их, чтобы /threads_scan отвечал быстро, но темы со
+                # временем всё равно покрывались широко.
+                browser_index = int(self.db.get_value("threads_browser_query_index", "0") or "0")
+                browser_index %= max(1, len(queries))
+                rotated_queries = queries[browser_index:] + queries[:browser_index]
+                queries = rotated_queries[:4]
+                self.db.set_value(
+                    "threads_browser_query_index",
+                    str((browser_index + 4) % max(1, len(queries) if len(queries) < 4 else 40)),
+                )
 
             logging.info("Threads comments: scanning mode=%s queries=%r", self.discovery_mode, queries)
             if self.discovery_mode == "browser":
@@ -239,7 +255,16 @@ class ThreadsCommentAssistant:
                 logging.info("Threads comments: no fresh eligible candidates in priority scan")
                 return 0
 
-            candidates = sorted(pool.values(), key=self._candidate_score, reverse=True)[:12]
+            ranked_pool = sorted(pool.values(), key=self._candidate_score, reverse=True)
+            russian_pool = [post for post in ranked_pool if re.search(r"[А-Яа-яЁё]", post.text)]
+            # Русские посты приоритетны. Английские используем только как fallback,
+            # если среди свежих кандидатов вообще нет русскоязычных.
+            candidates = (russian_pool or ranked_pool)[:10]
+            logging.info(
+                "Threads comments: language preference russian=%s, candidates=%s",
+                len(russian_pool),
+                len(candidates),
+            )
 
             # Сначала отдельным смысловым фильтром убираем посты из чужих сфер
             # (например, флористику, еду, магазины), даже если там есть слова
