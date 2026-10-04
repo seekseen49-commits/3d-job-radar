@@ -241,56 +241,22 @@ class ThreadsCommentAssistant:
 
             candidates = sorted(pool.values(), key=self._candidate_score, reverse=True)[:12]
 
-            reply_results = await asyncio.gather(
-                *(
-                    self.client.get_replies(post.id, limit=5)
-                    if self.client is not None and post.has_replies and not post.id.startswith("web:")
-                    else asyncio.sleep(0, result=[])
-                    for post in candidates
-                ),
-                return_exceptions=True,
-            )
+            # Сначала дешево выбираем лучший пост только по тексту.
+            # Vision запускаем уже после выбора, иначе локальная модель по очереди
+            # анализирует картинки многих кандидатов и один /threads_scan тянется минуты.
+            candidate_contexts = [
+                "\n".join(
+                    part
+                    for part in (
+                        post.text,
+                        f"Alt-текст медиа: {post.alt_text}" if post.alt_text else "",
+                    )
+                    if part
+                )
+                for post in candidates
+            ]
 
-            # Визуальный анализ дороже обычного текста, поэтому смотрим максимум
-            # первые 8 наиболее перспективных кандидатов. Остальные всё равно
-            # получают alt_text и контекст ответов.
-            vision_results = await asyncio.gather(
-                *(
-                    self.generator.describe_visuals(post.image_urls)
-                    if index < 8 and post.image_urls
-                    else asyncio.sleep(0, result=None)
-                    for index, post in enumerate(candidates)
-                ),
-                return_exceptions=True,
-            )
-
-            candidate_contexts: list[str] = []
-            extra_context_by_id: dict[str, str] = {}
-            for post, replies_result, vision_result in zip(
-                candidates,
-                reply_results,
-                vision_results,
-            ):
-                parts = [post.text]
-                extra_parts: list[str] = []
-
-                if post.alt_text:
-                    extra_parts.append(f"Alt-текст медиа: {post.alt_text}")
-
-                if not isinstance(vision_result, Exception) and vision_result:
-                    extra_parts.append(f"Что видно на медиа: {vision_result}")
-
-                if not isinstance(replies_result, Exception) and replies_result:
-                    replies = replies_result[:5]
-                    extra_parts.append("Комментарии под постом: " + " | ".join(replies))
-
-                if extra_parts:
-                    extra = "\n".join(extra_parts)
-                    extra_context_by_id[post.id] = extra
-                    parts.append(extra)
-
-                candidate_contexts.append("\n".join(parts))
-
+            logging.info("Threads comments: ranking %s candidates by text", len(candidates))
             try:
                 choice = await self.generator.choose_best(candidate_contexts)
             except Exception:
@@ -302,9 +268,33 @@ class ThreadsCommentAssistant:
                 return 0
 
             post = candidates[choice]
+            logging.info("Threads comments: selected post=%s, enriching one post", post.id)
+
+            extra_parts: list[str] = []
+            if post.alt_text:
+                extra_parts.append(f"Alt-текст медиа: {post.alt_text}")
+
+            if post.image_urls:
+                try:
+                    visual = await self.generator.describe_visuals(post.image_urls)
+                    if visual:
+                        extra_parts.append(f"Что видно на медиа: {visual}")
+                except Exception:
+                    logging.exception("Threads comments: visual analysis failed for selected post")
+
+            if self.client is not None and post.has_replies and not post.id.startswith("web:"):
+                try:
+                    replies = await self.client.get_replies(post.id, limit=5)
+                    if replies:
+                        extra_parts.append("Комментарии под постом: " + " | ".join(replies[:5]))
+                except Exception:
+                    logging.exception("Threads comments: replies fetch failed for selected post")
+
+            extra_context = "\n".join(extra_parts) if extra_parts else None
+            logging.info("Threads comments: generating draft for post=%s", post.id)
             draft = await self.generator.generate(
                 post.text,
-                extra_context=extra_context_by_id.get(post.id),
+                extra_context=extra_context,
             )
             self.db.save_threads_comment_draft(
                 post.id,
