@@ -22,8 +22,8 @@ from threads_rules import ineligibility_reason
 
 
 CORE_DISCOVERY_QUERIES = (
-    "3D", "Blender", "рендер", "анимация", "фриланс", "заказ",
-    "заказчик", "клиент", "монтаж", "работа", "проект", "портфолио",
+    "3D", "Blender", "рендер", "видеомонтаж",
+    "motion design", "Unreal Engine", "фриланс дизайнер", "нейросети дизайнер",
 )
 
 EXPANDED_DISCOVERY_QUERIES = (
@@ -241,9 +241,9 @@ class ThreadsCommentAssistant:
 
             candidates = sorted(pool.values(), key=self._candidate_score, reverse=True)[:12]
 
-            # Сначала дешево выбираем лучший пост только по тексту.
-            # Vision запускаем уже после выбора, иначе локальная модель по очереди
-            # анализирует картинки многих кандидатов и один /threads_scan тянется минуты.
+            # Сначала отдельным смысловым фильтром убираем посты из чужих сфер
+            # (например, флористику, еду, магазины), даже если там есть слова
+            # "заказ", "клиент" или "работа".
             candidate_contexts = [
                 "\n".join(
                     part
@@ -256,7 +256,21 @@ class ThreadsCommentAssistant:
                 for post in candidates
             ]
 
-            logging.info("Threads comments: ranking %s candidates by text", len(candidates))
+            logging.info("Threads comments: relevance-filtering %s candidates", len(candidates))
+            try:
+                relevant_indexes = await self.generator.filter_relevant(candidate_contexts)
+            except Exception:
+                logging.exception("Threads comments: relevance filtering failed")
+                return 0
+
+            if not relevant_indexes:
+                logging.info("Threads comments: no candidates matched the account interests")
+                return 0
+
+            candidates = [candidates[index] for index in relevant_indexes]
+            candidate_contexts = [candidate_contexts[index] for index in relevant_indexes]
+
+            logging.info("Threads comments: ranking %s relevant candidates by text", len(candidates))
             try:
                 choice = await self.generator.choose_best(candidate_contexts)
             except Exception:
@@ -264,7 +278,7 @@ class ThreadsCommentAssistant:
                 return 0
 
             if choice is None:
-                logging.info("Threads comments: Ollama rejected candidate pool")
+                logging.info("Threads comments: Ollama rejected relevant candidate pool")
                 return 0
 
             post = candidates[choice]
