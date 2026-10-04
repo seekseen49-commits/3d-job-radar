@@ -158,7 +158,7 @@ class ThreadsCommentAssistant:
 
             logging.info("Threads comments: scanning queries=%r", queries)
             results = await asyncio.gather(
-                *(self.client.search_recent(query, limit=30) for query in queries),
+                *(self.client.search_recent(query, limit=30, max_age_hours=24) for query in queries),
                 return_exceptions=True,
             )
 
@@ -299,8 +299,41 @@ class ThreadsCommentAssistant:
             lines.append(f"❌ Threads API: {escape(str(exc))}")
 
         try:
-            await self.client.search_recent("Blender", limit=1)
-            lines.append("✅ Keyword Search: endpoint доступен")
+            own_username = ""
+            try:
+                me = await self.client.me()
+                own_username = str(me.get("username") or "").strip().lower()
+            except Exception:
+                pass
+
+            found = []
+            for query in ("3D", "Blender", "design", "work"):
+                posts = await self.client.search_recent(
+                    query,
+                    limit=10,
+                    max_age_hours=24,
+                )
+                found.extend(posts)
+                if found:
+                    break
+
+            if found:
+                public_posts = [
+                    post for post in found
+                    if not own_username or post.username.strip().lower() != own_username
+                ]
+                if public_posts:
+                    lines.append(
+                        f"✅ Keyword Search: публичный поиск работает, свежих найдено {len(found)}"
+                    )
+                else:
+                    lines.append(
+                        "⚠️ Keyword Search: endpoint работает, но свежие результаты только вашего аккаунта"
+                    )
+            else:
+                lines.append(
+                    "⚠️ Keyword Search: endpoint работает, но за 24 ч свежих результатов не вернул"
+                )
         except Exception as exc:
             lines.append(f"❌ Keyword Search: {escape(str(exc))}")
 
