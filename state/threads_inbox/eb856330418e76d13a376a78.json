@@ -1,0 +1,9 @@
+{
+  "id": "web:af9a83df03373a092c898c03",
+  "username": "jaydubguala",
+  "text": "NBA2K\nHey everyone, I know yall saw my post about reverse engineering 2Ks motion engine to manually render their custom .singlemocap and .multiplemocap file types. These are the custom files that hold the motion data from the animation suits. I made a 103 white paper that I will be posting.\nI’m creating an engine that will allow the community to load any 2k animation into their own rendering software. This will free us from the evil monopoly",
+  "permalink": "https://www.threads.com/@jaydubguala/post/DeFWSRLlvWA/media",
+  "timestamp": "2026-10-04T19:07:27.000Z",
+  "query": "Unreal Engine",
+  "collected_at": "2026-10-07T00:03:36.391425+00:00"
+}
